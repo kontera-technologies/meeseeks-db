@@ -15,5 +15,6 @@
 
   :profiles {:dev {:source-paths ["dev"]
                    :dependencies [[org.clojure/tools.nrepl "0.2.12"]
+                                  [org.clojure/tools.namespace "0.2.11"]
                                   [org.clojure/test.check  "0.9.0"]]}
              :repl {:plugins [[com.billpiel/sayid "0.0.10"]]}})

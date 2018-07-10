@@ -1,5 +1,7 @@
 # meeseeks-db
 
+[![Build Status](https://travis-ci.com/kontera-technologies/meeseeks-db.svg?branch=master)](https://travis-ci.com/kontera-technologies/meeseeks-db)
+
 ![Meeseeks logo](doc/MeeseeksHQ.png)
 Redis-based fast sharded set-oriented DB
 
@@ -46,4 +48,5 @@ Following parameters are optional.
 
 ## License
 
-Copyright © 2016 Amobee.
+Licensed under [LGPL-3.0 or later](https://opensource.org/licenses/LGPL-3.0)
+Copyright © 2018 Amobee.

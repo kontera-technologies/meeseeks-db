@@ -53,50 +53,39 @@
                        gen/string-alphanumeric)))
 
 (def profile-gen
-  (gen/fmap (fn [[id gender age income race cc frequent-keywords uw gsw td zipcode]]
-              {:id                id
-               :gender            gender
-               :age               age
-               :income            income
-               :race              race
-               :cc                cc
-               :frequent-keywords frequent-keywords
-               :uw                uw
-               :gsw               gsw
-               :td                td
-               :zipcode           zipcode})
-            (gen/tuple gen/uuid
-                       (gen/elements [:male :female])
-                       (gen/elements [:2-11 :12-17 :18-24 :25-34 :35-44 :45-54 :55-64 :65+])
-                       (gen/elements [:0-15k :15-25k :25-40k :40-60k :60-75k :75-100k :100k+])
-                       (gen/elements [:black :white])
-                       (gen/elements ["us" "gb" "sg"])
-                       (gen/list-distinct
-                         (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
-                                         [2 (gen/large-integer* {:min 10 :max 40000000})]]))
-                       (gen/list-distinct
-                         (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
-                                         [2 (gen/large-integer* {:min 10 :max 40000000})]]))
-                       (gen/list-distinct
-                         (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
-                                         [2 (gen/large-integer* {:min 10 :max 40000000})]]))
-                       (gen/list-distinct
-                         (gen/frequency [[1 (gen/elements ["google.com"
-                                                           "facebook.com"
-                                                           "yahoo.com"
-                                                           "youtube.com"
-                                                           "bing.com"
-                                                           "duckduckgo.com"])]
-                                         [2 (gen/fmap (fn [[name suffix]]
-                                                        (str name \. suffix))
-                                                      (gen/tuple (gen/fmap join
-                                                                           (gen/vector gen/char-alphanumeric 1 10))
-                                                                 (gen/elements ["com"
-                                                                                "co.il"
-                                                                                "ca"
-                                                                                "co.uk"
-                                                                                "com.sg"])))]]))
-                       (gen/fmap str (gen/large-integer* {:min 10000 :max 99999})))))
+  (gen/hash-map
+    :id                gen/uuid
+     :gender            (gen/elements [:male :female])
+     :age               (gen/elements [:2-11 :12-17 :18-24 :25-34 :35-44 :45-54 :55-64 :65+])
+     :income            (gen/elements [:0-15k :15-25k :25-40k :40-60k :60-75k :75-100k :100k+])
+     :race              (gen/elements [:black :white])
+     :cc                (gen/elements ["us" "gb" "sg"])
+     :frequent-keywords (gen/list-distinct
+                          (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
+                                          [2 (gen/large-integer* {:min 10 :max 40000000})]]))
+     :uw                (gen/list-distinct
+                          (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
+                                          [2 (gen/large-integer* {:min 10 :max 40000000})]]))
+     :gsw               (gen/list-distinct
+                          (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
+                                          [2 (gen/large-integer* {:min 10 :max 40000000})]]))
+     :td                (gen/list-distinct
+                          (gen/frequency [[1 (gen/elements ["google.com"
+                                                            "facebook.com"
+                                                            "yahoo.com"
+                                                            "youtube.com"
+                                                            "bing.com"
+                                                            "duckduckgo.com"])]
+                                          [2 (gen/fmap (fn [[name suffix]]
+                                                         (str name \. suffix))
+                                                       (gen/tuple (gen/fmap join
+                                                                            (gen/vector gen/char-alphanumeric 1 10))
+                                                                  (gen/elements ["com"
+                                                                                 "co.il"
+                                                                                 "ca"
+                                                                                 "co.uk"
+                                                                                 "com.sg"])))]]))
+     :zipcode           (gen/fmap str (gen/large-integer* {:min 10000 :max 99999}))))
 (clojure.test/use-fixtures :once validate-schemas)
 (defn profile-indexer [obj]
   [[:gender (:gender obj)]

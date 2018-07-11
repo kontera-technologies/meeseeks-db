@@ -30,6 +30,7 @@
   query)
 
 (defn- cursor-seq* [conns iid->id name]
+  (mapcat (fn [conn] (translate-iids conn iid->id (wcar conn (car/smembers name)))) conns)
   (when-not (empty? conns)
     (let [conn (first conns)]
       (lazy-cat (translate-iids conn iid->id (wcar conn (car/smembers name)))
@@ -43,27 +44,21 @@
 (defn- cleanup-query-cursor [db query]
   (r/reduce conj [] (r/map (partial cleanup-query-cursor* query) @db)))
 
-(defrecord Cursor [name
-                     transient?
-                     op 
-                     nested
-                     db
-                     data-db
-                     iid->id]
+(s/defrecord Cursor [query :- Query
+                     client]
   AutoCloseable
-  (close [this]
-    (cleanup-query-cursor db this)))
+  (close [_this]
+    (cleanup-query-cursor (:db client) query)))
 
 (s/defn create-cursor! :- Cursor
-  [{:keys [db data-db f-iid->id] :as client} query :- Query]
-  (map->Cursor (assoc (create-cursor!* client query)
-                 :db db
-                 :data-db data-db
-                 :iid->id f-iid->id)))
+  [client query :- Query]
+  (->Cursor (create-cursor!* client query)
+            client))
 
 (s/defn cursor-seq [cursor]
-  (let [{:keys [name db iid->id]} cursor]
-    (cursor-seq* @db iid->id name)))
+  (let [{:keys [client query]} cursor
+        {:keys [db f-iid->id]} client]
+    (cursor-seq* @db f-iid->id (:name query))))
 
 (defn- sample-cursor* [view-name sample-size iid->id data-db fields conn]
   (let [sample (->> (wcar conn
@@ -77,11 +72,12 @@
         '()))))
 
 
-(defn cursor-size [cursor]
-  "Creates a cursor and returns the size of the resulting query"
-  (run-command @(:db cursor)
+(s/defn cursor-size :- s/Int
+  [cursor :- Cursor]
+  "Returns the size of the query"
+  (run-command @(get-in cursor [:client :db])
                (fn [conn]
-                 (wcar conn (car/scard (:name cursor))))
+                 (wcar conn (car/scard (get-in cursor [:query :name]))))
                (fnil + 0 0) 0
                (fn [ex]
                  (locking *out*
@@ -89,15 +85,16 @@
                  0)))
 
 
-(s/defn sample-cursor :- [{s/Keyword s/Any}]
+(s/defn sample-cursor :- [{Key s/Any}]
   [cursor :- Cursor
     sample-size :- (s/maybe s/Int) & 
     [fields :- [Key]]]
   (if (pos? (or sample-size 0))
-    (let [conns        @(:db cursor)
-          data-db      @(:data-db cursor)
-          iid->id      (:iid->id cursor)
-          cursor-name    (:name cursor)
+    (let [{:keys [client query]} cursor
+          conns        @(:db client)
+          data-db      @(:data-db client)
+          iid->id      (:f-iid->id client)
+          cursor-name    (:name query)
           sample-size* (+ (long (Math/ceil (/ sample-size (count conns)))) 100)]
       (->> (run-command conns
                         (partial sample-cursor*

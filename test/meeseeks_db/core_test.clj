@@ -225,15 +225,15 @@
                                             :age    ["2-11"
                                                      "12-17"]})))))
 
-(deftest query->cursor
+(deftest run-query
   (let [client   (initialize-client profile-indexer)
         profiles (gen/sample profile-gen 100)]
     (index-entities! client profiles)
     (testing "all males"
       (let [expected-profiles (filter #(= (:gender %) :male) profiles)
             query             (q/compile-query {"gender" "male"})]
-        (is (= (count expected-profiles) (q/query->cursor client query)))
-        (#'cursor/cleanup-query-cursor (:db client) query)))
+        (is (= (count expected-profiles) (q/run-query client query)))
+        (q/cleanup-query client query)))
     (testing "complex"
       (let [expected-profiles (filter (fn [p]
                                         (and (some #{"google.com"
@@ -249,8 +249,8 @@
                                                 [:or "age:2-11"
                                                  "age:12-17"]])]
         (is (= (count expected-profiles)
-               (q/query->cursor client query)))
-        (#'cursor/cleanup-query-cursor (:db client) query)))))
+               (q/run-query client query)))
+        (q/cleanup-query client query)))))
 
 (deftest map->query-expr
   (testing "simple"
@@ -288,16 +288,16 @@
       (let [cursor-spec (q/compile-query '(and "cc:us"))
             filtered    (filter #(= "us" (:cc %)) profiles)]
         (try
-          (is (= (count filtered) (q/query->cursor client cursor-spec)))
+          (is (= (count filtered) (q/run-query client cursor-spec)))
           (finally
-            (q/delete-cursor client cursor-spec)))))
+            (q/cleanup-query client cursor-spec)))))
     (testing "simple and query"
       (let [cursor-spec (q/compile-query '(and "cc:us" "gender:male"))
             filtered    (filter #(and (= "us" (:cc %)) (= :male (:gender %))) profiles)]
         (try
-          (is (= (count filtered) (q/query->cursor client cursor-spec)))
+          (is (= (count filtered) (q/run-query client cursor-spec)))
           (finally
-            (q/delete-cursor client cursor-spec)))))
+            (q/cleanup-query client cursor-spec)))))
     (testing "simple and with or query"
       (let [cursor-spec (q/compile-query '(and "cc:us" (or "f:1" "s:1")))
             filtered    (filter #(and (= "us" (:cc %))
@@ -305,23 +305,23 @@
                                           (contains? (set (:gsw %)) 1)))
                                 profiles)]
         (try
-          (is (= (count filtered) (q/query->cursor client cursor-spec)))
+          (is (= (count filtered) (q/run-query client cursor-spec)))
           (finally
-            (q/delete-cursor client cursor-spec)))))
+            (q/cleanup-query client cursor-spec)))))
     (testing "simple not query"
       (let [cursor-spec (q/compile-query '(and (not "total" "d:yahoo.com")))
             filtered    (remove #(contains? (set (:td %)) "yahoo.com") profiles)]
         (try
-          (is (= (count filtered) (q/query->cursor client cursor-spec)))
+          (is (= (count filtered) (q/run-query client cursor-spec)))
           (finally
-            (q/delete-cursor client cursor-spec)))))
+            (q/cleanup-query client cursor-spec)))))
     (testing "single term not queries"
       (let [cursor-spec (q/compile-query '(not "d:yahoo.com"))
             filtered    (remove #(contains? (set (:td %)) "yahoo.com") profiles)]
         (try
-          (is (= (count filtered) (q/query->cursor client cursor-spec)))
+          (is (= (count filtered) (q/run-query client cursor-spec)))
           (finally
-            (q/delete-cursor client cursor-spec)))))
+            (q/cleanup-query client cursor-spec)))))
     (testing "more complex not query"
       (let [cursor-spec (q/compile-query '(and "cc:us"
                                                (not (or "d:yahoo.com"
@@ -340,9 +340,9 @@
                                                   profiles)))
                              (set (filter #(prop-visited? "google.com" %) profiles))))]
         (try
-          (is (= (count filtered) (q/query->cursor client cursor-spec)))
+          (is (= (count filtered) (q/run-query client cursor-spec)))
           (finally
-            (q/delete-cursor client cursor-spec)))))))
+            (q/cleanup-query client cursor-spec)))))))
 
 (comment ;Tests broken
  (deftest scoped-queries
@@ -364,15 +364,15 @@
                            (set (filter #(prop-visited? "yahoo.com" %) profiles))
                            (set (filter #(prop-is? :gender :female %) profiles)))]
         (try
-          (q/query->cursor client scope-spec)
+          (q/run-query client scope-spec)
           (is (= (count filtered-m)
-                 (q/query->cursor client query-m-spec)))
+                 (q/run-query client query-m-spec)))
           (is (= (count filtered-f)
-                 (q/query->cursor client query-f-spec)))
+                 (q/run-query client query-f-spec)))
           (finally
-            (q/delete-cursor client query-m-spec)
-            (q/delete-cursor client query-f-spec)
-            (q/delete-cursor client scope-spec)))))
+            (q/cleanup-query client query-m-spec)
+            (q/cleanup-query client query-f-spec)
+            (q/cleanup-query client scope-spec)))))
     (testing "scoped query with complex scope"
       (let [scope-spec   (q/compile-query '(or "d:yahoo.com"
                                                "d:bing.com"))
@@ -397,15 +397,15 @@
                               (set (filter #(prop-is? :cc "us" %) profiles))
                               (set (filter #(prop-is? :gender :female %) profiles))))]
         (try
-          (q/query->cursor client scope-spec)
+          (q/run-query client scope-spec)
           (is (= (count filtered-m)
-                 (q/query->cursor client query-m-spec)))
+                 (q/run-query client query-m-spec)))
           (is (= (count filtered-f)
-                 (q/query->cursor client query-f-spec)))
+                 (q/run-query client query-f-spec)))
           (finally
-            (q/delete-cursor client query-m-spec)
-            (q/delete-cursor client query-f-spec)
-            (q/delete-cursor client scope-spec)))))
+            (q/cleanup-query client query-m-spec)
+            (q/cleanup-query client query-f-spec)
+            (q/cleanup-query client scope-spec)))))
     (testing "multiple scoped queries"
       (let [filtered-m (intersection
                          (union

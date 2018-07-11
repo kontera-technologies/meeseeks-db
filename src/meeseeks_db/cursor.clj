@@ -18,16 +18,27 @@
   (:require [meeseeks-db.query :as q]
             [meeseeks-db.utils :refer [translate-iids run-command fetch-objects
                                        ;; Schemas
-                                       Attr Op Key Query]]
-            [clojure.core.reducers :as r]
+                                       Attr Op Key QueryExpression]]
             [clojure.stacktrace :as st]
             [schema.core :as s]
             [taoensso.carmine :as car :refer [wcar]])
-  (:import [java.lang AutoCloseable]))
+  (:import [java.lang AutoCloseable]
+           [meeseeks_db.query Query]))
 
-(defn- create-cursor!* [client query]
-  (q/query->cursor client query)
-  query)
+(s/defrecord Cursor [query :- Query
+                     client]
+  AutoCloseable
+  (close [_this]
+    (q/cleanup-query client query)))
+
+(s/defn create-cursor! :- Cursor
+  [client
+   query :- (s/cond-pre Query QueryExpression)]
+  (let [query (if (instance? Query query)
+                query
+                (q/compile-query query))]
+    (q/run-query client query)
+    (->Cursor query client)))
 
 (defn- cursor-seq* [conns iid->id name]
   (mapcat (fn [conn] (translate-iids conn iid->id (wcar conn (car/smembers name)))) conns)
@@ -36,41 +47,10 @@
       (lazy-cat (translate-iids conn iid->id (wcar conn (car/smembers name)))
                 (cursor-seq* (rest conns) iid->id name)))))
 
-
-(defn- cleanup-query-cursor* [query conn]
-  (when (:transient? query)
-    (wcar conn (car/del (:name query)))))
-
-(defn- cleanup-query-cursor [db query]
-  (r/reduce conj [] (r/map (partial cleanup-query-cursor* query) @db)))
-
-(s/defrecord Cursor [query :- Query
-                     client]
-  AutoCloseable
-  (close [_this]
-    (cleanup-query-cursor (:db client) query)))
-
-(s/defn create-cursor! :- Cursor
-  [client query :- Query]
-  (->Cursor (create-cursor!* client query)
-            client))
-
 (s/defn cursor-seq [cursor]
   (let [{:keys [client query]} cursor
         {:keys [db f-iid->id]} client]
     (cursor-seq* @db f-iid->id (:name query))))
-
-(defn- sample-cursor* [view-name sample-size iid->id data-db fields conn]
-  (let [sample (->> (wcar conn
-                          (car/srandmember view-name sample-size))
-                    (translate-iids conn iid->id))]
-    (if (or (empty? fields)
-            (and (= 1 (count fields)) (= :id (first fields))))
-      (map #(hash-map :id %) sample)
-      (if (seq sample)
-        (fetch-objects data-db sample fields)
-        '()))))
-
 
 (s/defn cursor-size :- s/Int
   [cursor :- Cursor]
@@ -83,6 +63,18 @@
                  (locking *out*
                    (st/print-stack-trace ex))
                  0)))
+
+
+(defn- sample-cursor* [view-name sample-size iid->id data-db fields conn]
+  (let [sample (->> (wcar conn
+                          (car/srandmember view-name sample-size))
+                    (translate-iids conn iid->id))]
+    (if (or (empty? fields)
+            (and (= 1 (count fields)) (= :id (first fields))))
+      (map #(hash-map :id %) sample)
+      (if (seq sample)
+        (fetch-objects data-db sample fields)
+        '()))))
 
 
 (s/defn sample-cursor :- [{Key s/Any}]

@@ -23,9 +23,14 @@
    [clojure.string :refer [starts-with? replace-first]]
    [meeseeks-db.utils :refer [stringify attr translate-iids fetch-objects run-command max-workers
                               ;;Schemas
-                              Key Value Op Attr Named QueryMap QueryExpression Query]])
+                              Key Value Op Attr Named QueryMap QueryExpression]])
   (:import
-   (java.util UUID)))
+    (java.util UUID)))
+
+(s/defrecord Query [name :- Named
+                    transient? :- s/Bool
+                    op :- (s/maybe (s/enum :and :or :not))
+                    nested :- [(s/maybe (s/recursive (ref Query)))]])
 
 (defn- filter-value->query [k v]
   (if (vector? v)
@@ -73,20 +78,21 @@
 
 (s/defn compile-query :- Query
   [q :- QueryExpression]
-  (cond
-    (sequential? q) (let [[op & args] q]
-                      (cond
-                        (= 0 (count args)) {:name       "total"
-                                            :transient? false}
-                        (and (not= (keyword op) :not)
-                             (= 1 (count args))) (compile-query (first args))
-                        :else {:op         (keyword op)
-                               :name       (str "tmp:" (UUID/randomUUID))
-                               :transient? true
-                               :nested     (vec (map compile-query args))}))
-    (associative? q) (compile-query (map->query-expr q))
-    :else  {:name       (or q "total")
-            :transient? false}))
+  (map->Query
+    (cond
+      (sequential? q) (let [[op & args] q]
+                        (cond
+                          (= 0 (count args)) {:name       "total"
+                                              :transient? false}
+                          (and (not= (keyword op) :not)
+                               (= 1 (count args))) (compile-query (first args))
+                          :else {:op         (keyword op)
+                                 :name       (str "tmp:" (UUID/randomUUID))
+                                 :transient? true
+                                 :nested     (vec (map compile-query args))}))
+      (associative? q) (compile-query (map->query-expr q))
+      :else {:name       (or q "total")
+             :transient? false})))
 
 (defn apply-scope [scope query]
   (let [pscope {:name (:name scope) :transient? false}]
@@ -97,7 +103,7 @@
        :transient? true
        :nested     [pscope query]})))
 
-(defn query->cursor* [query conn]
+(defn- run-query* [query conn]
   (try
     (letfn [(execute [query]
               (let [{:keys [op name nested]} query]
@@ -126,10 +132,10 @@
                    (st/print-stack-trace ex)))))
       -1)))
 
-(defn query->cursor [client query]
+(s/defn run-query :- s/Int [client query :- Query]
   "Creates a cursor and returns the size of the resulting query"
   (run-command @(:db client)
-               (partial query->cursor* query)
+               (partial run-query* query)
                (fnil + 0 0) 0
                (fn [ex]
                  (locking *out*
@@ -168,7 +174,7 @@
     (map results queries)))
 
 
-(defn delete-cursor [client query]
+(defn cleanup-query [client query]
   (when (:transient? query)
     (run-command @(:db client)
                  #(wcar % (car/del (:name query)))
@@ -183,13 +189,13 @@
     (let [size-f         (fn [cache conn query]
                            (if (contains? @cache conn)
                              (get @cache conn)
-                             (let [size (query->cursor* query conn)]
+                             (let [size (run-query* query conn)]
                                (swap! cache assoc conn size)
                                size)))
           scope-size     (size-f scope-sizes conn scope)
           reference-size (size-f reference-sizes conn reference)
-          s-query-size   (query->cursor* s-query conn)
-          r-query-size   (query->cursor* r-query conn)
+          s-query-size   (run-query* s-query conn)
+          r-query-size   (run-query* r-query conn)
           g0             (* 1.00 (/ s-query-size (max scope-size 1)))
           g1             (* 1.25 (/ r-query-size (max reference-size 1)))]
       [s-query conn s-query-size scope-size r-query-size reference-size (> g0 g1)])
@@ -224,18 +230,18 @@
                      (map compile-query)
                      (map (partial apply-scope scope)))]
     (try
-      (query->cursor client scope)
+      (run-query client scope)
       (doall
        (map #(hash-map :size %)
             (multiple-queries->cursor client queries)))
       (finally
-        (doall (pmap #(delete-cursor client %) (conj queries scope)))))))
+        (doall (pmap #(cleanup-query client %) (conj queries scope)))))))
 
 (defn bulk-scoped-smarter-queries [client scope-spec queries-specs reference-spec]
   (let [dbs @(:db client)]
     (if (<= (count queries-specs) (count dbs))
-     (bulk-scoped-queries client scope-spec queries-specs)
-     (let [scope (compile-query scope-spec)
+      (bulk-scoped-queries client scope-spec queries-specs)
+      (let [scope (compile-query scope-spec)
            reference (compile-query reference-spec)
            queries (map compile-query queries-specs)
            s-queries (->> queries
@@ -245,8 +251,8 @@
                           (map (partial apply-scope reference))
                           (map-indexed #(assoc %2 :id %1)))
            stats-jobs (map vector (cycle dbs) s-queries r-queries)]
-       (try
-         (let [stats-ch (run-stats (shuffle stats-jobs) scope reference)
+        (try
+          (let [stats-ch (run-stats (shuffle stats-jobs) scope reference)
                skip-ch (async/chan)
                in-ch (async/chan)
                out-chs (for [_ (range (min max-workers
@@ -270,7 +276,7 @@
                (async/thread
                  (loop []
                    (when-some [[conn q] (<!! in-ch)]
-                     (>!! out-ch [q (query->cursor* q conn)])
+                     (>!! out-ch [q (run-query* q conn)])
                      (recur)))
                  (async/close! out-ch))))
            (let [results (<!! (async/reduce
@@ -281,7 +287,7 @@
                                 {}
                                 (async/merge (conj out-chs skip-ch))))]
              (map #(hash-map :size (get results %)) s-queries)))
-         (finally
-           (doseq [q (concat s-queries r-queries [scope reference])]
-             (delete-cursor client q))))))))
+          (finally
+            (doseq [q (concat s-queries r-queries [scope reference])]
+              (cleanup-query client q))))))))
 

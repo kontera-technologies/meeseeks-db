@@ -36,11 +36,6 @@
     QueryMap
     Attr))
 
-(s/defschema Query {:name Named
-                    (s/optional-key :op) (s/enum :and :or :not)
-                    :transient? s/Bool
-                    (s/optional-key :nested) [(s/recursive #'Query)]})
-
 (def max-workers 20)
 
 (defn run-command [conns m r rinit ex-handler]

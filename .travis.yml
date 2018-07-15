@@ -13,3 +13,5 @@ before_install:
   - docker run -v ${PWD}/etc/dev-test/redis.conf:/usr/local/etc/redis.conf --name meeseeks-db-redis0 -p 26269:6379 -d redis redis-server /usr/local/etc/redis.conf
   - docker run -v ${PWD}/etc/dev-test/redis.conf:/usr/local/etc/redis.conf --name meeseeks-db-redis1 -p 26279:6379 -d redis redis-server /usr/local/etc/redis.conf
   - docker run -v ${PWD}/etc/dev-test/redis.conf:/usr/local/etc/redis.conf --name meeseeks-db-redis2 -p 26289:6379 -d redis redis-server /usr/local/etc/redis.conf
+
+script: lein midje

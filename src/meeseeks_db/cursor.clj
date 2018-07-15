@@ -37,7 +37,7 @@
   (let [query (if (instance? Query query)
                 query
                 (q/compile-query query))]
-    (q/run-query client query)
+    (q/run-query! client query)
     (->Cursor query client)))
 
 (defn- cursor-seq* [conns iid->id name]

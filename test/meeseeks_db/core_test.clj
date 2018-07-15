@@ -17,7 +17,9 @@
 (ns meeseeks-db.core-test
   (:require [meeseeks-db.core :as sut]
             [clojure.test :refer [deftest testing is]]
+            [midje.sweet :refer [facts fact =>] :as m]
             [clojure.test.check :as tc]
+            [taoensso.carmine :as car]
             [schema.test :refer [validate-schemas]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -25,8 +27,10 @@
             [clojure.set :refer [union difference intersection]]
             [meeseeks-db.test-db :refer [initialize-client index-entities!]]
             [meeseeks-db.query :as q]
-            [meeseeks-db.cursor :as cursor])
-  (:import [java.util.regex Pattern]))
+            [meeseeks-db.utils :as u]
+            [meeseeks-db.cursor :as cursor]))
+
+(clojure.test/use-fixtures :once validate-schemas)
 
 ;; utils
 
@@ -39,19 +43,23 @@
 (defn prop-visited? [domain o]
   (prop-has? :td domain o))
 
+(m/defchecker attr [name]
+  (m/every-checker
+    (m/contains {:name name :transient? false})))
+
+(m/defchecker node [op & children]
+  (m/just {:name (m/has-prefix "tmp:")
+           :op op
+           :transient? true
+           :nested (m/just children)}))
 ;; generators
 
 (def property-gen
-  (gen/fmap (fn [[id datatype label description]]
-              {:id          id
-               :datatype    datatype
-               :label       label
-               :description description})
-            (gen/tuple (gen/fmap (fn [id] (str "P" id)) gen/pos-int)
-                       (gen/elements [:string :quantity :globe-coordinate :wikimedia-item :time])
-                       (gen/not-empty gen/string-alphanumeric)
-                       gen/string-alphanumeric)))
-
+  (gen/hash-map
+           :id          (gen/fmap (fn [id] (str "P" id)) gen/pos-int)
+            :datatype    (gen/elements [:string :quantity :globe-coordinate :wikimedia-item :time])
+            :label       (gen/not-empty gen/string-alphanumeric)
+            :description gen/string-alphanumeric))
 (def profile-gen
   (gen/hash-map
     :id                gen/uuid
@@ -86,7 +94,7 @@
                                                                                  "co.uk"
                                                                                  "com.sg"])))]]))
      :zipcode           (gen/fmap str (gen/large-integer* {:min 10000 :max 99999}))))
-(clojure.test/use-fixtures :once validate-schemas)
+
 (defn profile-indexer [obj]
   [[:gender (:gender obj)]
    [:age (:age obj)]
@@ -179,51 +187,86 @@
      (is (= 1 (:size result)))
      (is (= "Z2" (:id (first (:sample result))))))))
 
-(deftest cursors
+(facts "about cursors"
   (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 10)]
+        profiles (gen/sample profile-gen 10)
+        expected (->> profiles
+                      (filter #(and (= (:gender %) :male) (= (:cc %) "us")))
+                      (map :id)
+                      distinct
+                      sort)]
     (index-entities! client profiles)
-    (with-open [cursor (cursor/create-cursor! client
-                                              (q/compile-query {:gender :male}))]
-      (is (= (-> (cursor/cursor-seq cursor)
-                 sort)
-             (->> profiles
-                  (filter #(= (:gender %) :male))
-                  (map :id)
-                  distinct
-                  sort))))))
 
-(defn similar-queries? [expected actual]
-  (let [expected-name (:name expected)
-        actual-name   (:name actual)]
-    (and
-      (if (and (instance? Pattern expected-name) (string? actual-name))
-        (is (boolean (re-matches expected-name actual-name)))
-        (is (= expected-name actual-name)))
-      (every? true? (map similar-queries? (:nested expected) (:nested actual))))))
+    (let [key-name (with-open [cursor (cursor/create-cursor! client (q/compile-query {:gender :male :cc "us"}))]
+                     (fact "create-cursor! works with a compiled query"
+                           (-> (cursor/cursor-seq cursor)
+                               sort) => expected)
+                     (get-in cursor [:query :name]))]
+      (fact "Cursor cleans up after itself"
+            (u/run-command @(:db client) #(car/wcar % (car/exists key-name)) + 0 nil)
+            => 0))
+    (fact "create-cursor! works with a query expression"
+          (with-open [cursor (cursor/create-cursor! client
+                                                    {:gender :male :cc "us"})]
+            (-> (cursor/cursor-seq cursor)
+                sort) => expected))))
 
-(deftest compile-query
-  (testing "simple"
-    (is (similar-queries? {:name "gender:male"}
-                          (q/compile-query [:and "gender:male"])))
-    (is (similar-queries? {:name   #"^tmp:.*$"
-                           :op     :and
-                           :nested [{:name   #"^tmp:.*$"
-                                     :op     :or
-                                     :nested [{:name "d:google.com"}
-                                              {:name "d:yahoo.com"}
-                                              {:name "d:bing.com"}]}
-                                    {:name "gender:male"}
-                                    {:name   #"^tmp:.*$"
-                                     :op     :or
-                                     :nested [{:name "age:2-11"}
-                                              {:name "age:12-17"}]}]}
-                          (q/compile-query {:d      ["google.com"
-                                                          "yahoo.com"
-                                                          "bing.com"]
-                                            :gender :male
-                                            :age    ["2-11"
-                                                     "12-17"]})))))
+
+
+(facts "about map->query-expr"
+  (q/map->query-expr {:countries ["US"]}) => '(:and "countries:US")
+  (q/map->query-expr {:countries "US"}) => '(:and "countries:US")
+  (q/map->query-expr {"countries" [:US]}) => '(:and "countries:US")
+  (q/map->query-expr {'countries ['US]}) => '(:and "countries:US")
+  (fact "AND different fields"
+        (q/map->query-expr {:countries         ["US"]
+                            :frequent-keywords [5101]}) => '(:and "countries:US" "frequent-keywords:5101"))
+  (fact "OR different values for the same field"
+        (q/map->query-expr {:countries         ["US"]
+                            :frequent-keywords [5101 5102]}) => '(:and "countries:US" (:or "frequent-keywords:5101" "frequent-keywords:5102")))
+  (fact "OR different fields with the same values"
+        (q/map->query-expr {:countries                ["US"]
+                            [:frequent-keywords :gsw] [5101]}) => '(:and "countries:US" (:or "frequent-keywords:5101" "gsw:5101")))
+  (fact "NOT as complement"
+        (q/map->query-expr {:d ["!yahoo.com"]}) => '(:and (:not "total" "d:yahoo.com")))
+  (fact "NOT as set difference"
+        (q/map->query-expr {:countries ["US"]
+                            :d         ["yahoo.com" "!google.com" "bing.com"
+                                        #{"duckduckgo.com" "facebook.com"}]}) => '(:and "countries:US"
+                                                                                    (:not (:or "d:yahoo.com" "d:bing.com"
+                                                                                              (:and "d:duckduckgo.com" "d:facebook.com"))
+                                                                                         "d:google.com"))))
+
+(m/facts :simple "about compile-query"
+  (fact "simple things work"
+        (q/compile-query "gender:male") => (attr "gender:male")
+        (fact "simplifying works"
+              (q/compile-query [:and "gender:male"]) => (attr "gender:male")
+              (q/compile-query [:or "gender:male"]) => (attr "gender:male")
+              (q/compile-query [:or "cc:us" [:or "cc:uk" "cc:il"]]) => (node :or
+                                                                             (attr "cc:us")
+                                                                             (attr "cc:uk")
+                                                                             (attr "cc:il")))
+        (q/compile-query {:gender :male}) => (attr "gender:male")
+
+        (q/compile-query [:or "gender:male" "gender:female"]) => (node :or
+                                                                       (attr "gender:male")
+                                                                       (attr "gender:female"))
+        (q/compile-query {:d      ["google.com"
+                                   "yahoo.com"
+                                   "bing.com"]
+                          :gender :male
+                          :age    ["2-11"
+                                   "12-17"]}) => (node :and
+                                                       (node :or
+                                                             (attr "d:google.com")
+                                                             (attr "d:yahoo.com")
+                                                             (attr "d:bing.com"))
+                                                       (attr "gender:male")
+                                                       (node :or
+                                                             (attr "age:2-11")
+                                                             (attr "age:12-17")))))
+
 
 (deftest run-query
   (let [client   (initialize-client profile-indexer)
@@ -232,7 +275,7 @@
     (testing "all males"
       (let [expected-profiles (filter #(= (:gender %) :male) profiles)
             query             (q/compile-query {"gender" "male"})]
-        (is (= (count expected-profiles) (q/run-query client query)))
+        (is (= (count expected-profiles) (q/run-query! client query)))
         (q/cleanup-query client query)))
     (testing "complex"
       (let [expected-profiles (filter (fn [p]
@@ -249,36 +292,10 @@
                                                 [:or "age:2-11"
                                                  "age:12-17"]])]
         (is (= (count expected-profiles)
-               (q/run-query client query)))
+               (q/run-query! client query)))
         (q/cleanup-query client query)))))
 
-(deftest map->query-expr
-  (testing "simple"
-    (is '(and "countries:US")
-        (q/map->query-expr {:countries ["US"]})))
-  (testing "simple and"
-    (is '(and "countries:US" "frequent-keywords:5101")
-        (q/map->query-expr {:countries         ["US"]
-                             :frequent-keywords [5101]})))
-  (testing "simple and with or"
-    (is '(and "countries:US" (or "frequent-keywords:5101" "frequent-keywords:5102"))
-        (q/map->query-expr {:countries         ["US"]
-                             :frequent-keywords [5101 5102]})))
-  (testing "and with or for different keys"
-    (is '(and "countries:US" (or "frequent-keywords:5101" "gsw:5101"))
-        (q/map->query-expr {:countries                ["US"]
-                             [:frequent-keywords :gsw] [5101]})))
-  (testing "simple not"
-    (is '(and (not "total" "d:yahoo.com"))
-        (q/map->query-expr {:d ["!yahoo.com"]})))
-  (testing "more complex not"
-    (is '(and "countries:US"
-              (not (or "d:yahoo.com" "d:bing.com"
-                       (and "d:duckduckgo.com" "d:facebook.com"))
-                   "google.com"))
-        (q/map->query-expr {:countries ["US"]
-                             :d         ["yahoo.com" "!google.com" "bing.com"
-                                         "duckduckgo.com" "facebook.com"]}))))
+
 
 (deftest queries
   (let [client   (initialize-client profile-indexer)
@@ -288,14 +305,14 @@
       (let [cursor-spec (q/compile-query '(and "cc:us"))
             filtered    (filter #(= "us" (:cc %)) profiles)]
         (try
-          (is (= (count filtered) (q/run-query client cursor-spec)))
+          (is (= (count filtered) (q/run-query! client cursor-spec)))
           (finally
             (q/cleanup-query client cursor-spec)))))
     (testing "simple and query"
       (let [cursor-spec (q/compile-query '(and "cc:us" "gender:male"))
             filtered    (filter #(and (= "us" (:cc %)) (= :male (:gender %))) profiles)]
         (try
-          (is (= (count filtered) (q/run-query client cursor-spec)))
+          (is (= (count filtered) (q/run-query! client cursor-spec)))
           (finally
             (q/cleanup-query client cursor-spec)))))
     (testing "simple and with or query"
@@ -305,21 +322,21 @@
                                           (contains? (set (:gsw %)) 1)))
                                 profiles)]
         (try
-          (is (= (count filtered) (q/run-query client cursor-spec)))
+          (is (= (count filtered) (q/run-query! client cursor-spec)))
           (finally
             (q/cleanup-query client cursor-spec)))))
     (testing "simple not query"
       (let [cursor-spec (q/compile-query '(and (not "total" "d:yahoo.com")))
             filtered    (remove #(contains? (set (:td %)) "yahoo.com") profiles)]
         (try
-          (is (= (count filtered) (q/run-query client cursor-spec)))
+          (is (= (count filtered) (q/run-query! client cursor-spec)))
           (finally
             (q/cleanup-query client cursor-spec)))))
     (testing "single term not queries"
       (let [cursor-spec (q/compile-query '(not "d:yahoo.com"))
             filtered    (remove #(contains? (set (:td %)) "yahoo.com") profiles)]
         (try
-          (is (= (count filtered) (q/run-query client cursor-spec)))
+          (is (= (count filtered) (q/run-query! client cursor-spec)))
           (finally
             (q/cleanup-query client cursor-spec)))))
     (testing "more complex not query"
@@ -340,12 +357,12 @@
                                                   profiles)))
                              (set (filter #(prop-visited? "google.com" %) profiles))))]
         (try
-          (is (= (count filtered) (q/run-query client cursor-spec)))
+          (is (= (count filtered) (q/run-query! client cursor-spec)))
           (finally
             (q/cleanup-query client cursor-spec)))))))
 
-(comment ;Tests broken
- (deftest scoped-queries
+
+(deftest scoped-queries
   (let [client   (initialize-client profile-indexer)
         profiles (gen/sample profile-gen 1000)]
     (index-entities! client profiles)
@@ -364,11 +381,11 @@
                            (set (filter #(prop-visited? "yahoo.com" %) profiles))
                            (set (filter #(prop-is? :gender :female %) profiles)))]
         (try
-          (q/run-query client scope-spec)
+          (q/run-query! client scope-spec)
           (is (= (count filtered-m)
-                 (q/run-query client query-m-spec)))
+                 (q/run-query! client query-m-spec)))
           (is (= (count filtered-f)
-                 (q/run-query client query-f-spec)))
+                 (q/run-query! client query-f-spec)))
           (finally
             (q/cleanup-query client query-m-spec)
             (q/cleanup-query client query-f-spec)
@@ -384,24 +401,24 @@
                               (q/apply-scope scope-spec))
             filtered-m   (intersection
                            (union
-                              (set (filter #(prop-visited? "yahoo.com" %) profiles))
-                              (set (filter #(prop-visited? "bing.com" %) profiles)))
+                             (set (filter #(prop-visited? "yahoo.com" %) profiles))
+                             (set (filter #(prop-visited? "bing.com" %) profiles)))
                            (intersection
-                              (set (filter #(prop-is? :cc "us" %) profiles))
-                              (set (filter #(prop-is? :gender :male %) profiles))))
+                             (set (filter #(prop-is? :cc "us" %) profiles))
+                             (set (filter #(prop-is? :gender :male %) profiles))))
             filtered-f   (intersection
                            (union
-                              (set (filter #(prop-visited? "yahoo.com" %) profiles))
-                              (set (filter #(prop-visited? "bing.com" %) profiles)))
+                             (set (filter #(prop-visited? "yahoo.com" %) profiles))
+                             (set (filter #(prop-visited? "bing.com" %) profiles)))
                            (intersection
-                              (set (filter #(prop-is? :cc "us" %) profiles))
-                              (set (filter #(prop-is? :gender :female %) profiles))))]
+                             (set (filter #(prop-is? :cc "us" %) profiles))
+                             (set (filter #(prop-is? :gender :female %) profiles))))]
         (try
-          (q/run-query client scope-spec)
+          (q/run-query! client scope-spec)
           (is (= (count filtered-m)
-                 (q/run-query client query-m-spec)))
+                 (q/run-query! client query-m-spec)))
           (is (= (count filtered-f)
-                 (q/run-query client query-f-spec)))
+                 (q/run-query! client query-f-spec)))
           (finally
             (q/cleanup-query client query-m-spec)
             (q/cleanup-query client query-f-spec)
@@ -409,23 +426,23 @@
     (testing "multiple scoped queries"
       (let [filtered-m (intersection
                          (union
-                            (set (filter #(prop-visited? "yahoo.com" %) profiles))
-                            (set (filter #(prop-visited? "bing.com" %) profiles)))
+                           (set (filter #(prop-visited? "yahoo.com" %) profiles))
+                           (set (filter #(prop-visited? "bing.com" %) profiles)))
                          (intersection
-                            (set (filter #(prop-is? :cc "us" %) profiles))
-                            (set (filter #(prop-is? :gender :male %) profiles))))
+                           (set (filter #(prop-is? :cc "us" %) profiles))
+                           (set (filter #(prop-is? :gender :male %) profiles))))
             filtered-f (intersection
                          (union
-                            (set (filter #(prop-visited? "yahoo.com" %) profiles))
-                            (set (filter #(prop-visited? "bing.com" %) profiles)))
+                           (set (filter #(prop-visited? "yahoo.com" %) profiles))
+                           (set (filter #(prop-visited? "bing.com" %) profiles)))
                          (intersection
-                            (set (filter #(prop-is? :cc "us" %) profiles))
-                            (set (filter #(prop-is? :gender :female %) profiles))))
+                           (set (filter #(prop-is? :cc "us" %) profiles))
+                           (set (filter #(prop-is? :gender :female %) profiles))))
             results    (q/bulk-scoped-queries
                          client
                          '(or "d:yahoo.com" "d:bing.com")
-                         '((and "cc:us" "gender:male"
-                            (and "cc:us" "gender:female"))))]
+                         '((and "cc:us" "gender:male")
+                           (and "cc:us" "gender:female")))]
         (is (= (count filtered-m) (:size (first results))))
         (is (= (count filtered-f) (:size (second results))))))
     (testing "multiple scoped queries with empty scope"
@@ -438,39 +455,39 @@
             results    (q/bulk-scoped-queries
                          client
                          '(and)
-                         '((and "cc:us" "gender:male"
-                            (and "cc:us" "gender:female"))))]
+                         '((and "cc:us" "gender:male")
+                           (and "cc:us" "gender:female")))]
         (is (= (count filtered-m) (:size (first results))))
         (is (= (count filtered-f) (:size (second results))))))
     (testing "smart-multiple scoped queries"
       (let [filtered-mb (intersection
                           (union
-                             (set (filter #(prop-visited? "yahoo.com" %) profiles))
-                             (set (filter #(prop-visited? "bing.com" %) profiles)))
+                            (set (filter #(prop-visited? "yahoo.com" %) profiles))
+                            (set (filter #(prop-visited? "bing.com" %) profiles)))
                           (intersection
-                             (set (filter #(prop-is? :cc "us" %) profiles))
-                             (set (filter #(prop-is? :gender :male %) profiles))
-                             (set (filter #(prop-is? :race :black %) profiles))))
+                            (set (filter #(prop-is? :cc "us" %) profiles))
+                            (set (filter #(prop-is? :gender :male %) profiles))
+                            (set (filter #(prop-is? :race :black %) profiles))))
             filtered-fb (intersection
                           (union
-                             (set (filter #(prop-visited? "yahoo.com" %) profiles))
-                             (set (filter #(prop-visited? "bing.com" %) profiles)))
+                            (set (filter #(prop-visited? "yahoo.com" %) profiles))
+                            (set (filter #(prop-visited? "bing.com" %) profiles)))
                           (intersection
-                             (set (filter #(prop-is? :cc "us" %) profiles))
-                             (set (filter #(prop-is? :gender :female %) profiles))
-                             (set (filter #(prop-is? :race :black %) profiles))))
+                            (set (filter #(prop-is? :cc "us" %) profiles))
+                            (set (filter #(prop-is? :gender :female %) profiles))
+                            (set (filter #(prop-is? :race :black %) profiles))))
             results     (q/bulk-scoped-smarter-queries
                           client
                           '(or "d:yahoo.com" "d:bing.com")
-                          '((and "cc:us" "gender:male"
-                             (and "cc:us" "gender:female")
-                             (and "cc:us" "gender:male" "race:black")
-                             (and "cc:us" "gender:female" "race:black")))
+                          '((and "cc:us" "gender:male")
+                            (and "cc:us" "gender:female")
+                            (and "cc:us" "gender:male" "race:black")
+                            (and "cc:us" "gender:female" "race:black"))
                           '(and "cc:us" "race:white"))]
         (is (= -1 (:size (nth results 0))))
         (is (= -1 (:size (nth results 1))))
         (is (= (count filtered-mb) (:size (nth results 2))))
-        (is (= (count filtered-fb) (:size (nth results 3)))))))))
+        (is (= (count filtered-fb) (:size (nth results 3))))))))
 
 (deftest smart-bulk-bug
   (let [client   (initialize-client profile-indexer)

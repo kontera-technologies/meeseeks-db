@@ -178,7 +178,7 @@
   (let [db (deref db)
         data-db (deref data-db)]
     (dorun
-     (pmap #(wcar % (car/flushall)) db))
+     (pmap #(wcar % (car/flushdb)) db))
     (dorun
      (pmap (fn [conn]
              (scan-indices* conn "p:*"

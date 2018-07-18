@@ -80,13 +80,13 @@
 (defn id->iid
   ([conn id]
    (if-let [iid (wcar conn (car/get (str "id:" id)))]
-     (do (when (nil? (wcar conn (car/get (str "iid:" iid)))) (wcar conn (car/set (str "iid:" iid) id))) iid)
-     (let [iid (:result (with-lock conn "kona-iid" 20000 50000 (wcar conn (car/incr "next-iid"))))]
-       (when iid (wcar conn
-                       (car/set (str "id:" id) iid)
-                       (car/set (str "iid:" iid) id)))
-
-       iid)))
+     iid
+     (let [iid (wcar conn (car/incr "next-iid"))]
+       (when iid (car/atomic conn 10
+                     (car/multi)
+                     (car/setnx (str "id:" id) iid)
+                     (car/setnx (str "iid:" iid) id)))
+       (wcar conn (car/get (str "id:" id))))))
   ([conn id delete?]
    (wcar conn (car/get (str "id:" id)))))
 
@@ -146,9 +146,8 @@
         obj       (wcar data-conn (fetch-object id))
         indices   (indexify f-index obj)]
     (wcar conn
-          (when-not (empty? indices)
-            (doseq [[k vs] indices]
-              (update-attr! iid k vs nil)))
+          (doseq [[k vs] indices]
+            (update-attr! iid k vs nil))
           (car/srem "total" iid))
 
     (wcar data-conn

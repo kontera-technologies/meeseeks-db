@@ -161,26 +161,28 @@
       (update-in query [:nested] conj pscope)
       (query-node :and [pscope query]))))
 
+(defn query->command-list [query]
+  (letfn [(execute [query]
+            (let [{:keys [op name nested]} query]
+              (doseq [q nested]
+                (execute q))
+              (when (seq nested)
+                (let [to-del (map :name (filter :transient? nested))]
+                  (condp = op
+                    :and (apply car/sinterstore name (map :name nested))
+                    :or (apply car/sunionstore name (map :name nested))
+                    :not (apply car/sdiffstore name (map :name nested)))
+                  (when (seq to-del)
+                    (apply car/del to-del))))))]
+    (execute query)))
+
 (defn- run-query* [query conn]
   (try
-    (letfn [(execute [query]
-              (let [{:keys [op name nested]} query]
-                (doseq [q nested]
-                  (execute q))
-                (if (seq nested)
-                  (let [to-del (map :name (filter :transient? nested))]
-                    (condp = op
-                      :and (apply car/sinterstore name (map :name nested))
-                      :or (apply car/sunionstore name (map :name nested))
-                      :not (apply car/sdiffstore name (if (= 1 (count nested))
-                                                        (into ["total"] (map :name nested))
-                                                        (map :name nested))))
-                    (when (seq to-del)
-                      (apply car/del to-del)
-                      (car/scard name)))
-                  (car/scard name))))]
-      (let [res (wcar conn (execute query))]
-        (if (number? res) res (last res))))
+    (let [res (wcar conn
+                    (query->command-list query)
+                    (car/scard (:name query)))]
+
+      (if (number? res) res (last res)))
     (catch Exception ex
       (locking *out*
         (println
@@ -199,21 +201,6 @@
                  (locking *out*
                    (st/print-stack-trace ex))
                  0)))
-
-(defn query->command-list [query]
-  (letfn [(execute [query]
-            (let [{:keys [op name nested]} query]
-              (doseq [q nested]
-                (execute q))
-              (when (seq nested)
-                (let [to-del (map :name (filter :transient? nested))]
-                  (condp = op
-                    :and (apply car/sinterstore name (map :name nested))
-                    :or (apply car/sunionstore name (map :name nested))
-                    :not (apply car/sdiffstore name (map :name nested)))
-                  (when (seq to-del)
-                    (apply car/del to-del))))))]
-    (execute query)))
 
 (defn multiple-queries->cursor [client queries]
   (let [queries (map-indexed #(assoc %2 :id %1) queries)

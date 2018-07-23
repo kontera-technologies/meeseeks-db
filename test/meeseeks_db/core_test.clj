@@ -51,7 +51,7 @@
   (m/just {:name (m/has-prefix "tmp:")
            :op op
            :transient? true
-           :nested (m/just children)}))
+           :nested (m/contains children :in-any-order)}))
 ;; generators
 
 (def property-gen

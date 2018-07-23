@@ -16,7 +16,7 @@
 
 (ns meeseeks-db.cursor
   (:require [meeseeks-db.query :as q]
-            [meeseeks-db.utils :refer [translate-iids run-command fetch-objects
+            [meeseeks-db.utils :refer [translate-iids run-command fetch-objects Queryable
                                        ;; Schemas
                                        Attr Op Key QueryExpression]]
             [clojure.stacktrace :as st]
@@ -29,7 +29,11 @@
                      client]
   AutoCloseable
   (close [_this]
-    (q/cleanup-query client query)))
+    (q/cleanup-query client query))
+  Queryable
+  (->query-expression [_this]
+    (:name query)))
+
 
 (s/defn create-cursor! :- Cursor
   [client

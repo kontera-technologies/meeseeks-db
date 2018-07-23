@@ -20,6 +20,10 @@
             [clojure.core.async     :as async :refer [<! <!! >! >!! go-loop]])
   (:import (clojure.lang Murmur3)))
 
+
+(defprotocol Queryable
+  (->query-expression [this]))
+
 (s/defschema Named (s/cond-pre s/Str s/Keyword s/Symbol))
 (s/defschema Op (s/enum :and :or :not 'and 'or 'not "and" "or" "not"))
 (s/defschema Key Named)
@@ -27,14 +31,15 @@
 (s/defschema Attr (s/constrained Named #(re-find #"^[^:]+:[^:]+$|total" (name %)) 'Attr))
 
 (s/defschema QueryMap
-  {(s/either Key [Key]) (s/either Value [Value] #{Value})})
+  {(s/either Key [Key] #{Key}) (s/either Value [Value] #{Value})})
 
 (s/defschema QueryExpression
   (s/cond-pre
     [(s/one Op "op")
      (s/recursive #'QueryExpression)]
-    QueryMap
+    (s/protocol Queryable)
     Attr))
+
 
 (def max-workers 20)
 

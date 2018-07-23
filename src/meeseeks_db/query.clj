@@ -21,9 +21,10 @@
     [clojure.stacktrace :as st]
     [schema.core :as s]
     [clojure.string :refer [starts-with? replace-first]]
-    [meeseeks-db.utils :refer [stringify attr translate-iids fetch-objects run-command max-workers
+    [meeseeks-db.utils :refer [stringify attr translate-iids fetch-objects run-command max-workers Queryable ->query-expression
                                ;;Schemas
-                               Key Value Op Attr Named QueryMap QueryExpression]]))
+                               Key Value Op Attr Named QueryMap QueryExpression]])
+  (:import [clojure.lang APersistentMap]))
 
 (s/defrecord Query [name :- Named
                     transient? :- s/Bool
@@ -92,21 +93,49 @@
        (map filter->query)
        (cons :and)))
 
+(s/defn ^:private simplify-not-expression :- QueryExpression
+  [[scope & removals] :- [QueryExpression]]
+  (if (empty? removals)
+    (list :not "total" scope)
+    (apply list :not scope removals)))
+(defn- op-expression?
+  ([op]
+   (fn [expr] (op-expression? op expr)))
+  ([op expr]
+   (and (sequential? expr)
+        (= op (keyword (first expr))))))
+
+(defn- not-expression? [query]
+  (op-expression? :not query))
+
 (s/defn ^:private simplify :- QueryExpression
   [expr :- QueryExpression]
   (loop [expr expr]
     (cond
+      (satisfies? Queryable expr)
+      (recur (->query-expression expr))
       (sequential? expr)
       (let [op   (keyword (first expr))
-            args (map simplify (rest expr))]
-        (cond (and (not= op :not) (= 1 (count args)))
+            same-op? (op-expression? op)
+            args (map simplify (rest expr))
+            uniq-args (set args)
+            {neg-args true pos-args false} (group-by not-expression? uniq-args)]
+        (cond (= op :not)
+              (simplify-not-expression args)
+              (= 1 (count args))
               (recur (first args))
-              (and (not= op :not) (some #(and (sequential? %) (= (keyword (first %)) op)) args))
-              (recur (apply list op (mapcat #(if (and (sequential? %) (= (keyword (first %)) op)) (rest %) [%]) args)))
+              (some same-op? args)
+              (recur (apply list op (mapcat #(if (same-op? %) (rest %) [%]) uniq-args)))
+              (not-empty neg-args)
+              (simplify-not-expression (cons (if-let [scope (not-empty (set (concat pos-args
+                                                                                    (remove #(= % "total")
+                                                                                            (map second neg-args)))))]
+                                               (simplify (apply list op scope))
+                                               "total")
+                                             (mapcat nnext neg-args)))
+
               :else
-              (apply list op args)))
-      (associative? expr)
-      (recur (map->query-expr expr))
+              (apply list op uniq-args)))
       :else
       expr)))
 
@@ -320,3 +349,7 @@
             (doseq [q (concat s-queries r-queries [scope reference])]
               (cleanup-query client q))))))))
 
+(extend-protocol Queryable
+  APersistentMap
+  (->query-expression [this]
+    (map->query-expr this)))

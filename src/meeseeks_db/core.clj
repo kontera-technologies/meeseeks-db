@@ -77,7 +77,7 @@
 ;; API
 
 ;; default id<->iid mappers
-(defn id->iid
+(defn default-id->iid
   ([conn id]
    (if-let [iid (wcar conn (car/get (str "id:" id)))]
      iid
@@ -90,13 +90,13 @@
   ([conn id delete?]
    (wcar conn (car/get (str "id:" id)))))
 
-(defn iid->id [iid]
+(defn default-iid->id [iid]
   (car/get (str "iid:" iid)))
 
 ;; API
 (defn init [dbs  {:keys [data-dbs f-id->iid f-iid->id f-index]
-                  :or   {f-id->iid id->iid
-                         f-iid->id iid->id}}]
+                  :or   {f-id->iid default-id->iid
+                         f-iid->id default-iid->id}}]
   (assert (ifn? f-index)  "f-index function is mandatory")
   (let [mdb {:db        dbs
              :data-db   (or dbs data-dbs)

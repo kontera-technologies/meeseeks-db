@@ -203,7 +203,7 @@
                                sort) => expected)
                      (get-in cursor [:query :name]))]
       (fact "Cursor cleans up after itself"
-            (u/run-command @(:db client) #(car/wcar % (car/exists key-name)) + 0 nil)
+            (u/run-command @(:db client) #(car/wcar % (car/exists key-name)) + 0)
             => 0))
     (fact "create-cursor! works with a query expression"
           (with-open [cursor (cursor/create-cursor! client

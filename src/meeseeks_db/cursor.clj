@@ -19,7 +19,6 @@
             [meeseeks-db.utils :refer [translate-iids run-command fetch-objects Queryable
                                        ;; Schemas
                                        Attr Op Key QueryExpression]]
-            [clojure.stacktrace :as st]
             [schema.core :as s]
             [taoensso.carmine :as car :refer [wcar]])
   (:import [java.lang AutoCloseable]
@@ -93,11 +92,7 @@
                                  iid->id
                                  data-db
                                  fields)
-                        into []
-                        (fn [ex]
-                          (locking *out*
-                            (st/print-stack-trace ex))
-                          []))
+                        into [])
            shuffle
            (take sample-size)))
     '()))

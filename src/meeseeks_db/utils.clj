@@ -17,7 +17,8 @@
 (ns meeseeks-db.utils
   (:require [taoensso.carmine :as car :refer [wcar]]
             [schema.core :as s]
-            [clojure.core.async     :as async :refer [<! <!! >! >!! go-loop]])
+            [clojure.core.async :as async :refer [<! <!! >! >!! go-loop]]
+            [clojure.stacktrace :as st])
   (:import (clojure.lang Murmur3)))
 
 
@@ -43,25 +44,34 @@
 
 (def max-workers 20)
 
-(defn run-command [conns m r rinit ex-handler]
-  (if (> (count conns) 2)
-    (let [n (min (count conns) max-workers)
-          in-ch (async/chan)
-          out-chs (doall (for [_ (range n)] (async/chan)))]
-      (doseq [out-ch out-chs]
-           (async/thread
-             (loop []
-               (when-some [conn (<!! in-ch)]
-                 (let [res (try
-                             (m conn)
-                             (catch Exception ex
-                               (ex-handler ex)))]
-                   (>!! out-ch res)
-                   (recur))))
-             (async/close! out-ch)))
-      (async/onto-chan in-ch conns)
-      (<!! (async/reduce r rinit (async/merge out-chs))))
-    (reduce r rinit (map m conns))))
+(def *exception-handler*
+  (fn [ex]
+    (locking *out*
+      (st/print-stack-trace ex))
+    nil))
+
+(defn run-command
+  ([conns m r rinit]
+   (run-command conns m r rinit *exception-handler*))
+  ([conns m r rinit ex-handler]
+   (if (> (count conns) 2)
+     (let [n (min (count conns) max-workers)
+           in-ch (async/chan)
+           out-chs (doall (for [_ (range n)] (async/chan)))]
+       (doseq [out-ch out-chs]
+            (async/thread
+              (loop []
+                (when-some [conn (<!! in-ch)]
+                  (let [res (try
+                              (m conn)
+                              (catch Exception ex
+                                (ex-handler ex)))]
+                    (>!! out-ch res)
+                    (recur))))
+              (async/close! out-ch)))
+       (async/onto-chan in-ch conns)
+       (<!! (async/reduce r rinit (async/merge out-chs))))
+     (reduce r rinit (map m conns)))))
 
 (defn id->conn [db id]
   (if (> (count db) 1)

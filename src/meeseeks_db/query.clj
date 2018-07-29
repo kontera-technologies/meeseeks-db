@@ -196,11 +196,7 @@
   "Creates a cursor and returns the size of the resulting query"
   (run-command @(:db client)
                (partial run-query* query)
-               (fnil + 0 0) 0
-               (fn [ex]
-                 (locking *out*
-                   (st/print-stack-trace ex))
-                 0)))
+               (fnil + 0 0) 0))
 
 (defn multiple-queries->cursor [client queries]
   (let [queries (map-indexed #(assoc %2 :id %1) queries)
@@ -223,11 +219,7 @@
   (when (:transient? query)
     (run-command @(:db client)
                  #(wcar % (car/del (:name query)))
-                 conj []
-                 (fn [ex]
-                   (locking *out*
-                     (st/print-stack-trace ex))
-                   false))))
+                 conj [])))
 
 (defn stats* [scope scope-sizes reference reference-sizes conn s-query r-query]
   (try

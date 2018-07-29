@@ -179,10 +179,10 @@
 (defn- run-query* [query conn]
   (try
     (let [res (wcar conn
-                    (query->command-list query)
+                    (car/parse-suppress
+                      (query->command-list query))
                     (car/scard (:name query)))]
-
-      (if (number? res) res (last res)))
+      res)
     (catch Exception ex
       (locking *out*
         (println
@@ -200,18 +200,16 @@
 
 (defn multiple-queries->cursor [client queries]
   (let [queries (map-indexed #(assoc %2 :id %1) queries)
-        results (doall (pmap (fn [connection]
-                               (let [res (wcar connection
-                                               (doseq [q queries] (query->command-list q))
-                                               (doseq [n (map #(:name %) queries)] (car/scard n)))
-                                     res (take-last (count queries) res)
-                                     res (map vector queries res)]
-                                 res))
-
-                             @(:db client)))
-        results (apply concat results)
-        results (reduce (fn [acc [query size]]
-                          (update-in acc [query] (fnil + 0 0) size)) {} results)]
+        results (run-command @(:db client)
+                             (fn [connection]
+                               (apply hash-map (wcar connection
+                                                    (car/parse-suppress
+                                                      (doseq [q queries] (query->command-list q)))
+                                                    (doseq [q queries]
+                                                      (car/return q)
+                                                      (car/scard (:name q))))))
+                             (partial merge-with (fnil + 0 0))
+                             {})]
     (map results queries)))
 
 

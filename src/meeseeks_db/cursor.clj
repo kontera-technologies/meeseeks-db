@@ -26,6 +26,7 @@
            [meeseeks_db.query Query]))
 
 (s/defrecord Cursor [query :- Query
+                     size :- s/Int
                      client]
   AutoCloseable
   (close [_this]
@@ -40,9 +41,9 @@
    query :- (s/cond-pre Query QueryExpression)]
   (let [query (if (instance? Query query)
                 query
-                (q/compile-query query))]
-    (q/run-query! client query)
-    (->Cursor query client)))
+                (q/compile-query query))
+        size (q/run-query! client query)]
+    (->Cursor query size client)))
 
 (defn- cursor-seq* [conns iid->id name]
   (mapcat (fn [conn] (translate-iids conn iid->id (wcar conn (car/smembers name)))) conns)
@@ -59,14 +60,7 @@
 (s/defn cursor-size :- s/Int
   [cursor :- Cursor]
   "Returns the size of the query"
-  (run-command @(get-in cursor [:client :db])
-               (fn [conn]
-                 (wcar conn (car/scard (get-in cursor [:query :name]))))
-               (fnil + 0 0) 0
-               (fn [ex]
-                 (locking *out*
-                   (st/print-stack-trace ex))
-                 0)))
+  (:size cursor))
 
 
 (defn- sample-cursor* [view-name sample-size iid->id data-db fields conn]

@@ -11,7 +11,8 @@
             :url    "https://www.gnu.org/licenses/lgpl-3.0.en.html"}
   :repl-options {:init-ns user
                  :init    (set! *print-length* 100)}
-
+  :deploy-repositories [["releases" :clojars]
+                        ["snapshots" :clojars]]
   :profiles {:dev {:source-paths ["dev"]
                    :dependencies [[org.clojure/tools.nrepl "0.2.12"]
                                   [org.clojure/tools.namespace "0.2.11"]

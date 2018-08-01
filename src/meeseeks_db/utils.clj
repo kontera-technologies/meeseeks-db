@@ -89,10 +89,9 @@
   (str (stringify key) \: (stringify value)))
 
 (defn translate-iids [conn iid->id iids]
-  (let [ids (wcar conn (doall (map iid->id iids)))]
-    (if (or (nil? ids) (coll? ids))
-      ids
-      (list ids))))
+  (let [ids (wcar conn :as-pipeline (doseq [iid iids]
+                                      (iid->id iid)))]
+    ids))
 
 
 (defn fetch-object [id & [fields]]

@@ -21,7 +21,7 @@
     [clojure.stacktrace :as st]
     [schema.core :as s]
     [clojure.string :refer [starts-with? replace-first]]
-    [meeseeks-db.utils :refer [stringify attr translate-iids fetch-objects run-command max-workers Queryable ->query-expression
+    [meeseeks-db.utils :refer [stringify attr translate-iids fetch-objects run-command *max-workers* Queryable ->query-expression
                                ;;Schemas
                                Key Value Op Attr Named QueryMap QueryExpression]])
   (:import [clojure.lang APersistentMap]))
@@ -241,7 +241,7 @@
 
 (defn run-stats [jobs scope reference]
   (let [in-ch           (async/chan)
-        out-chs         (for [_ (range (min (count jobs) max-workers))]
+        out-chs         (for [_ (range (min (count jobs) *max-workers*))]
                           (async/chan))
         scope-sizes     (atom {})
         reference-sizes (atom {})]
@@ -290,7 +290,7 @@
           (let [stats-ch (run-stats (shuffle stats-jobs) scope reference)
                 skip-ch  (async/chan)
                 in-ch    (async/chan)
-                out-chs  (for [_ (range (min max-workers
+                out-chs  (for [_ (range (min *max-workers*
                                              (- (* (count dbs)
                                                    (count s-queries))
                                                 (count stats-jobs))))]

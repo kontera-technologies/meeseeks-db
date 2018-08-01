@@ -42,9 +42,9 @@
     Attr))
 
 
-(def max-workers 20)
+(def ^:dynamic *max-workers* 20)
 
-(def *exception-handler*
+(def ^:dynamic *exception-handler*
   (fn [ex]
     (locking *out*
       (st/print-stack-trace ex))
@@ -55,7 +55,7 @@
    (run-command conns m r rinit *exception-handler*))
   ([conns m r rinit ex-handler]
    (if (> (count conns) 2)
-     (let [n (min (count conns) max-workers)
+     (let [n (min (count conns) *max-workers*)
            in-ch (async/chan)
            out-chs (doall (for [_ (range n)] (async/chan)))]
        (doseq [out-ch out-chs]

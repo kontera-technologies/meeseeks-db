@@ -51,7 +51,7 @@
   (m/just {:name (m/has-prefix "tmp:")
            :op op
            :transient? true
-           :nested (m/contains children :in-any-order)}))
+           :nested (m/just children :in-any-order)}))
 ;; generators
 
 (def property-gen
@@ -189,7 +189,7 @@
 
 (facts "about cursors"
   (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 10)
+        profiles (gen/sample profile-gen 1000)
         expected (->> profiles
                       (filter #(and (= (:gender %) :male) (= (:cc %) "us")))
                       (map :id)
@@ -209,9 +209,16 @@
           (with-open [cursor (cursor/create-cursor! client
                                                     {:gender :male :cc "us"})]
             (-> (cursor/cursor-seq cursor)
-                sort) => expected))))
+                sort) => expected))
+    (if (pos? (count expected))
+      (fact "unindexing works"
+            (sut/unindex! client (first expected))
+            (:size (sut/query client)) => (dec (count profiles))
+            (:size (sut/query client {:gender :male :cc "us"})) => (dec (count expected))))
 
-
+    (fact "remove-all works"
+          (sut/remove-all! client)
+          (:size (sut/query client)) => 0)))
 
 (facts "about map->query-expr"
   (q/map->query-expr {:countries ["US"]}) => '(:and "countries:US")
@@ -236,6 +243,9 @@
                                                                                     (:not (:or "d:yahoo.com" "d:bing.com"
                                                                                               (:and "d:duckduckgo.com" "d:facebook.com"))
                                                                                          "d:google.com"))))
+(m/facts :simple "about simplify"
+  (#'q/simplify ["and", ["and", {"iw" 31565330}, ["not", {"iw" 1255650}]], {"cc" "us"}]) =>
+  '(:not (:and "iw:31565330" "cc:us") "iw:1255650"))
 
 (m/facts :simple "about compile-query"
   (fact "simple things work"

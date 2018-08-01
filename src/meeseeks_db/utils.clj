@@ -18,8 +18,7 @@
   (:require [taoensso.carmine :as car :refer [wcar]]
             [schema.core :as s]
             [clojure.core.async :as async :refer [<! <!! >! >!! go-loop]]
-            [clojure.stacktrace :as st])
-  (:import (clojure.lang Murmur3)))
+            [clojure.stacktrace :as st]))
 
 
 (defprotocol Queryable
@@ -73,12 +72,6 @@
        (<!! (async/reduce r rinit (async/merge out-chs))))
      (reduce r rinit (map m conns)))))
 
-(defn id->conn [db id]
-  (if (> (count db) 1)
-    (let [hc (Murmur3/hashUnencodedChars (str id))]
-      (nth db (mod hc (count db))))
-    (first db)))
-
 (defn stringify [o]
   (cond
     (string? o)  o
@@ -99,17 +92,3 @@
     (if fields
       (apply car/hmget* k fields)
       (car/parse-map (car/hgetall k) :keywordize))))
-
-
-(defn fetch-objects [db ids fields]
-  (let [conn->ids (reduce (fn [acc id]
-                            (let [conn (id->conn db id)]
-                              (update-in acc [conn] conj id)))
-                          {}
-                          ids)]
-    (doall
-      (mapcat (fn [[conn ids]]
-                (if (= (count ids) 1)
-                  [(into {} (wcar conn (fetch-object (first ids) fields)))]
-                  (wcar conn (doall (map #(fetch-object % fields) ids)))))
-              conn->ids))))

@@ -15,15 +15,16 @@
 ;    along with meeseeks-db.  If not, see <https://www.gnu.org/licenses/>.
 
 (ns meeseeks-db.core
-  (:require [taoensso.carmine       :as car :refer [wcar]]
+  (:require [taoensso.carmine :as car :refer [wcar]]
             [taoensso.carmine.locks :refer [with-lock]]
-            [taoensso.nippy         :refer [freeze lzma2-compressor]]
-            [clojure.set            :refer [difference]]
-            [clojure.string         :refer [starts-with? replace-first]]
+            [taoensso.nippy :refer [freeze lzma2-compressor]]
+            [clojure.set :refer [difference]]
+            [clojure.string :refer [starts-with? replace-first]]
             [meeseeks-db.query :as q]
             [meeseeks-db.cursor :as c]
             [schema.core :as s]
-            [meeseeks-db.utils      :refer [stringify id->conn translate-iids fetch-objects fetch-object QueryExpression Key Value]]))
+            [meeseeks-db.utils :refer [stringify translate-iids fetch-object QueryExpression Key Value]])
+  (:import [clojure.lang Murmur3]))
 
 ;; ===========================================================================
 ;; utils
@@ -93,26 +94,34 @@
 (defn default-iid->id [iid]
   (car/get (str "iid:" iid)))
 
+(defn default-id->conn [db id]
+  (if (> (count db) 1)
+    (let [hc (Murmur3/hashUnencodedChars (str id))]
+      (nth db (mod hc (count db))))
+    (first db)))
+
 ;; API
-(defn init [dbs  {:keys [data-dbs f-id->iid f-iid->id f-index]
-                  :or   {f-id->iid default-id->iid
-                         f-iid->id default-iid->id}}]
+(defn init [dbs  {:keys [data-dbs f-id->iid f-iid->id f-index f-id->conn]
+                  :or   {f-id->iid  default-id->iid
+                         f-iid->id  default-iid->id
+                         f-id->conn default-id->conn}}]
   (assert (ifn? f-index)  "f-index function is mandatory")
   (let [mdb {:db        dbs
              :data-db   (or dbs data-dbs)
              :f-id->iid f-id->iid
+             :f-id->conn f-id->conn
              :f-iid->id f-iid->id
              :f-index   f-index}]
     mdb))
 
 (defn index!
   "Index and store an object."
-  [{:keys [db data-db f-id->iid f-index]} {:keys [id] :as obj}]
+  [{:keys [db data-db f-id->iid f-index f-id->conn]} {:keys [id] :as obj}]
   (let [db          (deref db)
         data-db     (deref data-db)
-        conn        (id->conn db id)
+        conn        (f-id->conn db id)
         iid         (f-id->iid conn id)
-        data-conn   (id->conn data-db id)
+        data-conn   (f-id->conn data-db id)
         old         (wcar data-conn (fetch-object id))
         index-pairs (merge-with conj
                                 (->> (indexify f-index old)
@@ -137,11 +146,11 @@
 
 (defn unindex!
   "Remove the object and its indices."
-  [{:keys [db data-db f-id->iid f-index]} id]
+  [{:keys [db data-db f-id->iid f-index f-id->conn]} id]
   (let [db        @db
         data-db   @data-db
-        conn      (id->conn db id)
-        data-conn (id->conn data-db id)
+        conn      (f-id->conn db id)
+        data-conn (f-id->conn data-db id)
         iid       (f-id->iid conn id "delete")
         obj       (wcar data-conn (fetch-object id))
         indices   (indexify f-index obj)]
@@ -156,9 +165,9 @@
 
 (defn fetch
   "Fetch object by ID"
-  [{:keys [data-db]} id & [fields]]
+  [{:keys [data-db f-id->conn]} id & [fields]]
   (let [data-db (deref data-db)
-        conn    (id->conn data-db id)]
+        conn    (f-id->conn data-db id)]
     (wcar conn (fetch-object id fields))))
 
 (s/defn query :- {:size s/Int :sample [{Key s/Any}]}

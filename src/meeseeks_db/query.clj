@@ -21,7 +21,7 @@
     [clojure.stacktrace :as st]
     [schema.core :as s]
     [clojure.string :refer [starts-with? replace-first]]
-    [meeseeks-db.utils :refer [stringify attr translate-iids fetch-objects run-command *max-workers* Queryable ->query-expression
+    [meeseeks-db.utils :refer [stringify attr translate-iids run-command *max-workers* Queryable ->query-expression
                                ;;Schemas
                                Key Value Op Attr Named QueryMap QueryExpression]])
   (:import [clojure.lang APersistentMap]))

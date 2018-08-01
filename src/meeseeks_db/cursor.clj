@@ -16,7 +16,7 @@
 
 (ns meeseeks-db.cursor
   (:require [meeseeks-db.query :as q]
-            [meeseeks-db.utils :refer [translate-iids run-command fetch-objects Queryable
+            [meeseeks-db.utils :refer [translate-iids fetch-object run-command Queryable
                                        ;; Schemas
                                        Attr Op Key QueryExpression]]
             [schema.core :as s]
@@ -62,7 +62,18 @@
   (:size cursor))
 
 
-(defn- sample-cursor* [view-name sample-size iid->id data-db fields conn]
+(defn- fetch-objects [db id->conn ids fields]
+  (let [conn->ids (reduce (fn [acc id]
+                            (let [conn (id->conn db id)]
+                              (update acc conn conj id)))
+                          {}
+                          ids)]
+    (reduce concat
+      (pmap (fn [[conn ids]]
+              (wcar conn :as-pipeline (doseq [id ids] (fetch-object id fields))))
+            conn->ids))))
+
+(defn- sample-cursor* [view-name id->conn sample-size iid->id data-db fields conn]
   (let [sample (->> (wcar conn
                           (car/srandmember view-name sample-size))
                     (translate-iids conn iid->id))]
@@ -70,7 +81,7 @@
             (and (= 1 (count fields)) (= :id (first fields))))
       (map #(hash-map :id %) sample)
       (if (seq sample)
-        (fetch-objects data-db sample fields)
+        (fetch-objects data-db id->conn sample fields)
         '()))))
 
 
@@ -83,11 +94,13 @@
           conns        @(:db client)
           data-db      @(:data-db client)
           iid->id      (:f-iid->id client)
+          id->conn     (:f-id->conn client)
           cursor-name    (:name query)
           sample-size* (+ (long (Math/ceil (/ sample-size (count conns)))) 100)]
       (->> (run-command conns
                         (partial sample-cursor*
                                  cursor-name
+                                 id->conn
                                  sample-size*
                                  iid->id
                                  data-db

@@ -61,12 +61,12 @@
             (async/thread
               (loop []
                 (when-some [conn (<!! in-ch)]
-                  (let [res (try
-                              (m conn)
-                              (catch Exception ex
-                                (ex-handler ex)))]
-                    (>!! out-ch res)
-                    (recur))))
+                  (if-some [res (try
+                                  (m conn)
+                                  (catch Exception ex
+                                    (ex-handler ex)))]
+                    (>!! out-ch res))
+                  (recur)))
               (async/close! out-ch)))
        (async/onto-chan in-ch conns)
        (<!! (async/reduce r rinit (async/merge out-chs))))

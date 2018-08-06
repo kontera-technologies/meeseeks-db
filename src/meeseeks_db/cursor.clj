@@ -73,41 +73,30 @@
               (wcar conn :as-pipeline (doseq [id ids] (fetch-object id fields))))
             conn->ids))))
 
-(defn- sample-cursor* [view-name id->conn sample-size iid->id data-db fields conn]
-  (let [sample (->> (wcar conn
-                          (car/srandmember view-name sample-size))
-                    (translate-iids conn iid->id))]
-    (if (or (empty? fields)
-            (and (= 1 (count fields)) (= :id (first fields))))
-      (map #(hash-map :id %) sample)
-      (if (seq sample)
-        (fetch-objects data-db id->conn sample fields)
-        '()))))
-
-
 (s/defn sample-cursor :- [{Key s/Any}]
   [cursor :- Cursor
-    sample-size :- (s/maybe s/Int) & 
-    [fields :- [Key]]]
+   sample-size :- (s/constrained s/Int pos?)
+   fields :- [Key]]
   (if (pos? (or sample-size 0))
     (let [{:keys [client query]} cursor
           conns        @(:db client)
           data-db      @(:data-db client)
           iid->id      (:f-iid->id client)
           id->conn     (:f-id->conn client)
-          cursor-name    (:name query)
-          sample-size* (+ (long (Math/ceil (/ sample-size (count conns)))) 100)]
-      (->> (run-command conns
-                        (partial sample-cursor*
-                                 cursor-name
-                                 id->conn
-                                 sample-size*
-                                 iid->id
-                                 data-db
-                                 fields)
-                        into [])
-           shuffle
-           (take sample-size)))
+          cursor-name  (:name query)
+          sample-size* (+ (long (Math/ceil (/ sample-size (count conns)))) 100)
+          ids          (->> (run-command conns
+                                         (fn [conn]
+                                           (->> (wcar conn
+                                                      (car/srandmember cursor-name sample-size*))
+                                                (translate-iids conn iid->id)))
+                                         into #{})
+                            shuffle
+                            (take sample-size))]
+      (if (or (empty? fields)
+              (and (= 1 (count fields) (= :id (keyword (first fields))))))
+        (map #(hash-map :id %) ids)
+        (fetch-objects data-db id->conn ids fields)))
     '()))
 
 (defn destroy-cursor! [cursor]

@@ -189,36 +189,52 @@
 
 (facts "about cursors"
   (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 1000)
-        expected (->> profiles
+        profiles (map-indexed #(assoc %2 :id (str %1)) (gen/sample profile-gen 1000))
+
+        us-males (->> profiles
                       (filter #(and (= (:gender %) :male) (= (:cc %) "us")))
                       (map :id)
                       distinct
-                      sort)]
+                      sort)
+        query    {:gender :male :cc "us"}]
     (index-entities! client profiles)
 
-    (let [key-name (with-open [cursor (cursor/create-cursor! client (q/compile-query {:gender :male :cc "us"}))]
+    (let [key-name (with-open [cursor (cursor/create-cursor! client (q/compile-query query))]
                      (fact "create-cursor! works with a compiled query"
                            (-> (cursor/cursor-seq cursor)
-                               sort) => expected)
+                               sort) => us-males)
                      (get-in cursor [:query :name]))]
       (fact "Cursor cleans up after itself"
             (u/run-command @(:db client) #(car/wcar % (car/exists key-name)) + 0)
             => 0))
     (fact "create-cursor! works with a query expression"
           (with-open [cursor (cursor/create-cursor! client
-                                                    {:gender :male :cc "us"})]
+                                                    query)]
             (-> (cursor/cursor-seq cursor)
-                sort) => expected))
-    (if (pos? (count expected))
-      (fact "unindexing works"
-            (sut/unindex! client (first expected))
-            (:size (sut/query client)) => (dec (count profiles))
-            (:size (sut/query client {:gender :male :cc "us"})) => (dec (count expected))))
+                sort) => us-males))
+    (when (pos? (count us-males))
+      (let [q (sut/query client query (count profiles))]
+        (fact "Samples have the right size"
+              (count (:sample q)) => (count us-males)
+              (:size q) => (count us-males)))
+
+      (facts "when unindexing"
+        (doseq [id (take 10 us-males)]
+          (sut/unindex! client id))
+        (let [new-male-count (max 0 (- (count us-males) 10))
+              new-total-count (- (count profiles) (min 10 (count us-males)))
+              total           (sut/query client :total (count profiles))
+              q               (sut/query client query (count profiles))]
+          (fact "Reported size shrinks"
+                (:size total) => new-total-count
+                (:size q) => new-male-count)
+          (fact "Sample size shrinks"
+                (count (:sample total)) => new-total-count
+                (count (:sample q)) => new-male-count))))
 
     (fact "remove-all works"
           (sut/remove-all! client)
-          (:size (sut/query client)) => 0)))
+          (sut/query client :total (count profiles)) => {:size 0 :sample []})))
 
 (facts "about map->query-expr"
   (q/map->query-expr {:countries ["US"]}) => '(:and "countries:US")

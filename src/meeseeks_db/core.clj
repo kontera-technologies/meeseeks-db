@@ -23,7 +23,7 @@
             [meeseeks-db.query :as q]
             [meeseeks-db.cursor :as c]
             [schema.core :as s]
-            [meeseeks-db.utils :refer [stringify translate-iids fetch-object QueryExpression Key Value]])
+            [meeseeks-db.utils :refer [fetch-object QueryExpression Key Value]])
   (:import [clojure.lang Murmur3]))
 
 ;; ===========================================================================
@@ -177,7 +177,9 @@
     fields :- [Key]]]
   (with-open [cursor (c/create-cursor! client (q/compile-query query))]
     {:size   (c/cursor-size cursor)
-     :sample (c/sample-cursor cursor sample-size fields)}))
+     :sample (if (pos-int? sample-size)
+               (c/sample-cursor cursor sample-size fields)
+               [])}))
 
 (defn scan-indices [{:keys [db]} pattern f]
   (dorun (pmap #(scan-indices* % pattern f) db)))

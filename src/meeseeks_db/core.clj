@@ -107,7 +107,7 @@
                          f-id->conn default-id->conn}}]
   (assert (ifn? f-index)  "f-index function is mandatory")
   (let [mdb {:db        dbs
-             :data-db   (or dbs data-dbs)
+             :data-db   (or data-db dbs)
              :f-id->iid f-id->iid
              :f-id->conn f-id->conn
              :f-iid->id f-iid->id

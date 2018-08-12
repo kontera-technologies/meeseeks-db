@@ -101,10 +101,32 @@
     (first db)))
 
 ;; API
-(defn init [dbs  {:keys [data-dbs f-id->iid f-iid->id f-index f-id->conn]
-                  :or   {f-id->iid  default-id->iid
-                         f-iid->id  default-iid->id
-                         f-id->conn default-id->conn}}]
+(s/defschema Connection
+  "Carmine connection spec"
+  {(s/optional-key :pool) s/Any
+   :spec (s/pred map?)})
+(s/defschema ClientConfig
+  {:f-index (s/pred fn?)
+   (s/optional-key :data-db) (s/atom [Connection])
+   (s/optional-key :f-id->iid) (s/pred fn?)
+   (s/optional-key :f-iid->id) (s/pred fn?)
+   (s/optional-key :f-id->conn) (s/pred fn?)})
+
+(s/defn init [dbs :- (s/atom [Connection]) {:keys [f-index data-db f-id->iid f-iid->id f-id->conn]
+                                            :or   {f-id->iid  default-id->iid
+                                                   f-iid->id  default-iid->id
+                                                   f-id->conn default-id->conn}} :- ClientConfig]
+  "Initialize meeseeks client
+
+  Options:
+  :f-index    - Function from domain object maps to indices (required)
+  :data-db    - Optionally use different Redis connections for storing domain object maps
+  :f-id->iid  - Function from connection and ID to IID for that connection
+  :f-iid->id  - Function from IID to the original ID. Run in the context of `wcar`
+  :f-id->conn - Function from list of DBs (either dbs or data-db) and ID to the appropriate connection
+
+
+  "
   (assert (ifn? f-index)  "f-index function is mandatory")
   (let [mdb {:db        dbs
              :data-db   (or data-db dbs)

@@ -18,7 +18,11 @@
   (:require [taoensso.carmine :as car :refer [wcar]]
             [schema.core :as s]
             [clojure.core.async :as async :refer [<! <!! >! >!! go-loop]]
-            [clojure.stacktrace :as st]))
+            [clojure.stacktrace :as st]
+            [schema.spec.collection :as collection]
+            [schema.spec.core :as spec])
+  (:import [clojure.lang IDeref]
+           [schema.core Schema]))
 
 
 (defprotocol Queryable
@@ -87,6 +91,24 @@
     ids))
 
 
+(defn- deref? [x]
+  (instance? IDeref x))
+
+
+(clojure.core/defrecord Derefable [schema]
+  Schema
+  (spec [this]
+    (collection/collection-spec
+      (spec/simple-precondition this deref?)
+      atom
+      [(collection/one-element true schema (clojure.core/fn [item-fn coll] (item-fn @coll) nil))]
+      (fn [_ xs _] (clojure.core/atom (first xs)))))
+  (explain [this] (list 'deref (s/explain schema))))
+
+(clojure.core/defn deref-of
+  "An atom containing a value matching 'schema'."
+  [schema]
+  (->Derefable schema))
 (defn fetch-object [id & [fields]]
   (let [k (str "p:" id)]
     (if fields

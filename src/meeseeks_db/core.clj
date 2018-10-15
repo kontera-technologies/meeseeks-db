@@ -23,7 +23,7 @@
             [meeseeks-db.query :as q]
             [meeseeks-db.cursor :as c]
             [schema.core :as s]
-            [meeseeks-db.utils :refer [fetch-object QueryExpression Key Value]])
+            [meeseeks-db.utils :refer [fetch-object QueryExpression Key Value deref-of]])
   (:import [clojure.lang Murmur3]))
 
 ;; ===========================================================================
@@ -107,15 +107,15 @@
    :spec (s/pred map?)})
 (s/defschema ClientConfig
   {:f-index (s/pred fn?)
-   (s/optional-key :data-db) (s/atom [Connection])
+   (s/optional-key :data-db) (deref-of [Connection])
    (s/optional-key :f-id->iid) (s/pred fn?)
    (s/optional-key :f-iid->id) (s/pred fn?)
    (s/optional-key :f-id->conn) (s/pred fn?)})
 
-(s/defn init [dbs :- (s/atom [Connection]) {:keys [f-index data-db f-id->iid f-iid->id f-id->conn]
-                                            :or   {f-id->iid  default-id->iid
-                                                   f-iid->id  default-iid->id
-                                                   f-id->conn default-id->conn}} :- ClientConfig]
+(s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db f-id->iid f-iid->id f-id->conn]
+                                              :or   {f-id->iid  default-id->iid
+                                                     f-iid->id  default-iid->id
+                                                     f-id->conn default-id->conn}} :- ClientConfig]
   "Initialize meeseeks client
 
   Options:

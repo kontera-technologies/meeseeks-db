@@ -120,12 +120,14 @@
             same-op? (op-expression? op)
             args (map simplify (rest expr))
             uniq-args (set args)
+            uniq-args (if (= op :and) (remove #(= "total" %) uniq-args)
+                                      uniq-args)
             {neg-args true pos-args false} (group-by not-expression? uniq-args)]
         (cond (= op :not)
               (simplify-not-expression args)
-              (= 1 (count args))
-              (recur (first args))
-              (some same-op? args)
+              (= 1 (count uniq-args))
+              (recur (first uniq-args))
+              (some same-op? uniq-args)
               (recur (apply list op (mapcat #(if (same-op? %) (rest %) [%]) uniq-args)))
               (not-empty neg-args)
               (simplify-not-expression (cons (if-let [scope (not-empty (set (concat pos-args
@@ -134,7 +136,8 @@
                                                (simplify (apply list op scope))
                                                "total")
                                              (mapcat nnext neg-args)))
-
+              (and (= op :or) (some #(= "total" %) uniq-args))
+              "total"
               :else
               (apply list op uniq-args)))
       :else

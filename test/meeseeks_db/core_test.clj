@@ -261,7 +261,9 @@
                                                                                          "d:google.com"))))
 (m/facts :simple "about simplify"
   (#'q/simplify ["and", ["and", {"iw" 31565330}, ["not", {"iw" 1255650}]], {"cc" "us"}]) =>
-  '(:not (:and "iw:31565330" "cc:us") "iw:1255650"))
+  '(:not (:and "iw:31565330" "cc:us") "iw:1255650")
+  (#'q/simplify ["and", ["and", {"iw" 31565330}, ["not", {"iw" 1255650}]], {"cc" []}]) =>
+  '(:not "iw:31565330" "iw:1255650"))
 
 (m/facts :simple "about compile-query"
   (fact "simple things work"

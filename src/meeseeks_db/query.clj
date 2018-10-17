@@ -61,6 +61,7 @@
    (cond
      (set? ks) (cons :and (map #(filter->query % vs) ks))
      (sequential? ks) (cons :or (map #(filter->query % vs) ks))
+     (and (seqable? vs) (empty? vs)) "total"
      :else (let [vs             (if (coll? vs) vs [vs])
                  op             (if (set? vs) :and :or)
                  negated?       #(and (string? %) (starts-with? % "!"))

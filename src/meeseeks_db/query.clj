@@ -33,8 +33,8 @@
 
 (s/defn ^:private query-node :- Query
   [op :- Op
-   nested :- [Query]]
-  (->Query (str "tmp:" (name op) \_ (hash (into #{} (map (comp name :name)) nested)))
+   nested :- [Query]] ;; TODO: Remove the rand-int, so we can have proper caching
+  (->Query (str "tmp:" (name op) \_ (hash (into #{(rand-int 9999999)} (map (comp name :name)) nested)))
            true
            (keyword op)
            (vec nested)))

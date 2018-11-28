@@ -78,7 +78,8 @@
 ;; API
 
 ;; default id<->iid mappers
-(defn default-id->iid
+
+#_(defn default-id->iid
   ([conn id]
    (if-let [iid (wcar conn (car/get (str "id:" id)))]
      iid
@@ -90,6 +91,20 @@
        (wcar conn (car/get (str "id:" id))))))
   ([conn id delete?]
    (wcar conn (car/get (str "id:" id)))))
+
+;hard fix for nil users
+(defn default-id->iid
+  ([conn id]
+   (if-let [iid (wcar conn (car/get (str "id:" id)))]
+     (do (when (nil? (wcar conn (car/get (str "iid:" iid)))) (wcar conn (car/set (str "iid:" iid) id))) iid)
+     (let [iid (:result (with-lock conn "kona-iid" 20000 50000 (wcar conn (car/incr "next-iid"))))]
+       (when iid (wcar conn
+                       (car/set (str "id:" id) iid)
+                       (car/set (str "iid:" iid) id)
+                       ))
+       iid)))
+  ([conn id delete?]
+   (wcar conn (car/get (str "id:" id))) ))
 
 (defn default-iid->id [iid]
   (car/get (str "iid:" iid)))

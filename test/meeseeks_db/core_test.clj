@@ -48,10 +48,10 @@
     (m/contains {:name name :transient? false})))
 
 (m/defchecker node [op & children]
-  (m/just {:name (m/has-prefix "tmp:")
-           :op op
-           :transient? true
-           :nested (m/just children :in-any-order)}))
+  (m/contains {:name (m/has-prefix "tmp:")
+               :op op
+               :transient? true
+               :nested (m/just children :in-any-order)}))
 ;; generators
 
 (def property-gen

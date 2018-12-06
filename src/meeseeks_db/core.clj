@@ -104,7 +104,7 @@
                        ))
        iid)))
   ([conn id delete?]
-   (wcar conn (car/get (str "id:" id))) ))
+   (wcar conn (car/get (str "id:" id)))))
 
 (defn default-iid->id [iid]
   (car/get (str "iid:" iid)))
@@ -123,11 +123,12 @@
 (s/defschema ClientConfig
   {:f-index (s/pred fn?)
    (s/optional-key :data-db) (deref-of [Connection])
+   (s/optional-key :ttl) (s/maybe s/Int)
    (s/optional-key :f-id->iid) (s/pred fn?)
    (s/optional-key :f-iid->id) (s/pred fn?)
    (s/optional-key :f-id->conn) (s/pred fn?)})
 
-(s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db f-id->iid f-iid->id f-id->conn]
+(s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db ttl f-id->iid f-iid->id f-id->conn]
                                               :or   {f-id->iid  default-id->iid
                                                      f-iid->id  default-iid->id
                                                      f-id->conn default-id->conn}} :- ClientConfig]
@@ -145,6 +146,7 @@
   (assert (ifn? f-index)  "f-index function is mandatory")
   (let [mdb {:db        dbs
              :data-db   (or data-db dbs)
+             :ttl ttl
              :f-id->iid f-id->iid
              :f-id->conn f-id->conn
              :f-iid->id f-iid->id

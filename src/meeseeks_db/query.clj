@@ -20,30 +20,40 @@
     [clojure.core.async :as async :refer [>!! <!!]]
     [clojure.stacktrace :as st]
     [schema.core :as s]
+    [clojure.walk :refer [postwalk]]
     [clojure.string :refer [starts-with? replace-first]]
     [meeseeks-db.utils :refer [stringify attr translate-iids run-command *max-workers* Queryable ->query-expression
                                ;;Schemas
-                               Key Value Op Attr Named QueryMap QueryExpression]])
+                               Key Value Op Attr Named QueryMap QueryExpression]]
+    [clojure.set :as set])
   (:import [clojure.lang APersistentMap]))
 
 (s/defrecord Query [name :- Named
                     transient? :- s/Bool
                     op :- (s/maybe (s/enum :and :or :not))
-                    nested :- [(s/maybe (s/recursive (ref Query)))]])
+                    nested :- [(s/maybe (s/recursive (ref Query)))]
+                    ttl :- (s/maybe s/Int)])
 
+(def ^:private ^:dynamic *ttl* nil)
+(def ^:private ^:dynamic *query-nonce* nil)
 (s/defn ^:private query-node :- Query
   [op :- Op
-   nested :- [Query]] ;; TODO: Remove the rand-int, so we can have proper caching
-  (->Query (str "tmp:" (name op) \_ (hash (into #{(rand-int 9999999)} (map (comp name :name)) nested)))
-           true
-           (keyword op)
-           (vec nested)))
+   nested :- [Query]]
+  (let [keys (map (comp name :name) nested)
+        keys (into (if *ttl* #{} #{(or *query-nonce* (rand-int 999999))}) keys)]
+    (->Query (str "tmp:" (name op) \_ (hash keys))
+             true
+             (keyword op)
+             (vec nested)
+             *ttl*)))
 
+(def min-query-ttl 60)
 
 (s/defn ^:private query-attr :- Query
   [name :- Attr]
   (->Query name
            false
+           nil
            nil
            nil))
 (defn- filter-value->query [k v]
@@ -153,10 +163,14 @@
     :else (query-attr (or q "total"))))
 
 (s/defn compile-query :- Query
-  [q :- QueryExpression]
+  [q :- QueryExpression & [ttl]]
   (if (instance? Query q)
     q
-    (compile-query* (simplify q))))
+    (let [binding-map (if ttl
+                        {#'*ttl* ttl}
+                        {#'*query-nonce* (rand-int Integer/MAX_VALUE)})]
+      (with-bindings binding-map
+        (compile-query* (simplify q))))))
 
 
 (defn apply-scope [scope query]
@@ -164,21 +178,66 @@
     (if (= (:op query) :and)
       (update-in query [:nested] conj pscope)
       (query-node :and [pscope query]))))
+(defn- gather-names [query]
+  (let [{:keys [name nested transient?]} query]
+    (if transient?
+      (cons name (mapcat gather-names nested)))))
+
+(defn- float-deletes [query]
+  (postwalk (fn [q]
+               (if (instance? Query q)
+                 (let [my-deletes       (into #{} (comp (filter (every-pred :transient? #(nil? (:ttl %))))
+                                                        (map :name))
+                                              (:nested q))
+                       ascended-deletes (->> (:nested q)
+                                             (mapcat :deletes)
+                                             (group-by identity)
+                                             (into #{} (comp
+                                                         (filter #(>= (count (val %)) 2))
+                                                         (map key))))
+                       deletes          (set/union my-deletes ascended-deletes)]
+                   (-> q
+                       (assoc :deletes deletes)
+                       (update :nested (fn [nested]
+                                         (vec (for [n nested]
+                                                (update n :deletes #(set/difference % deletes))))))))
+                 q))
+            query))
 
 (defn query->command-list [query]
-  (letfn [(execute [query]
-            (let [{:keys [op name nested]} query]
-              (doseq [q nested]
-                (execute q))
-              (when (seq nested)
-                (let [to-del (map :name (filter :transient? nested))]
-                  (condp = op
-                    :and (apply car/sinterstore name (map :name nested))
-                    :or (apply car/sunionstore name (map :name nested))
-                    :not (apply car/sdiffstore name (map :name nested)))
-                  (when (seq to-del)
-                    (apply car/del to-del))))))]
-    (execute query)))
+  (let [query-names (-> (gather-names query)
+                        set
+                        vec)
+        query-ttls (zipmap query-names
+                           (car/parse nil (car/with-replies :as-pipeline
+                                            (doseq [name query-names]
+                                              (car/ttl name)))))
+        query (float-deletes query)]
+    (letfn [(execute [query]
+              (let [{:keys [op name nested ttl deletes]} query]
+                (when (or (nil? ttl) (< (get query-ttls name 0) min-query-ttl))
+                  (doseq [q nested]
+                    (execute q))
+                  (when (seq nested)
+                    (condp = op
+                      :and (apply car/sinterstore name (map :name nested))
+                      :or (apply car/sunionstore name (map :name nested))
+                      :not (apply car/sdiffstore name (map :name nested)))
+                    (when ttl
+                      (car/expire name ttl))
+                    (when (seq deletes)
+                      (apply car/del deletes))))))]
+      (execute query))))
+
+(s/defn mark-ttls :- Query [query :- Query ttl :- s/Int]
+  (with-bindings {#'*ttl* ttl}
+    (postwalk (fn [q]
+                (if (and (instance? Query q)
+                         (:transient? q)
+                         (nil? (:ttl q)))
+                  (map->Query (merge q (query-node (:op q) (:nested q))))
+                  q))
+              query)))
 
 (defn- run-query* [query conn]
   (try
@@ -198,23 +257,27 @@
 
 (s/defn run-query! :- s/Int [client query :- Query]
   "Creates a cursor and returns the size of the resulting query"
-  (run-command @(:db client)
-               (partial run-query* query)
-               (fnil + 0 0) 0))
-
+  (let [query (cond-> query
+                      (:ttl client) (mark-ttls query (:ttl client)))]
+    (run-command @(:db client)
+                 (partial run-query* query)
+                 (fnil + 0 0) 0)))
 (defn multiple-queries->cursor [client queries]
   (let [queries (map-indexed #(assoc %2 :id %1) queries)
         results (run-command @(:db client)
                              (fn [connection]
-                               (apply hash-map (wcar connection
-                                                    (car/parse-suppress
-                                                      (doseq [q queries] (query->command-list q)))
-                                                    (doseq [q queries]
-                                                      (car/return q)
-                                                      (car/scard (:name q))))))
+
+                               (let [replies (wcar connection
+                                                   (car/parse-suppress
+                                                     (doseq [q queries] (query->command-list q)))
+                                                   (doseq [q queries]
+                                                     (car/return q)
+                                                     (car/scard (:name q))))
+                                     replies (drop-while #(not (instance? Query %)) replies)]
+                                 (apply hash-map replies)))
                              (partial merge-with (fnil + 0 0))
                              {})]
-    (map results queries)))
+       (map results queries)))
 
 
 (defn cleanup-query [client query]

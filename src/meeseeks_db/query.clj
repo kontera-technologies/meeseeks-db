@@ -173,7 +173,7 @@
         (compile-query* (simplify q))))))
 
 
-(defn apply-scope [scope query]
+(defn- apply-scope [scope query]
   (let [pscope (query-attr (:name scope))]
     (if (= (:op query) :and)
       (update-in query [:nested] conj pscope)

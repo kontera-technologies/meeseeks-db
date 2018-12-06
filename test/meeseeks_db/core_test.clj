@@ -398,10 +398,10 @@
       (let [scope-spec   (q/compile-query '(and "d:yahoo.com"))
             query-m-spec (->> '(and "gender:male")
                               q/compile-query
-                              (q/apply-scope scope-spec))
+                              (#'q/apply-scope scope-spec))
             query-f-spec (->> '(and "gender:female")
                               q/compile-query
-                              (q/apply-scope scope-spec))
+                              (#'q/apply-scope scope-spec))
             filtered-m   (intersection
                            (set (filter #(prop-visited? "yahoo.com" %) profiles))
                            (set (filter #(prop-is? :gender :male %) profiles)))
@@ -423,10 +423,10 @@
                                                "d:bing.com"))
             query-m-spec (->> '(and "cc:us" "gender:male")
                               q/compile-query
-                              (q/apply-scope scope-spec))
+                              (#'q/apply-scope scope-spec))
             query-f-spec (->> '(and "cc:us" "gender:female")
                               q/compile-query
-                              (q/apply-scope scope-spec))
+                              (#'q/apply-scope scope-spec))
             filtered-m   (intersection
                            (union
                              (set (filter #(prop-visited? "yahoo.com" %) profiles))

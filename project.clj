@@ -1,4 +1,4 @@
-(defproject com.amobee/meeseeks-db "0.10.7"
+(defproject com.amobee/meeseeks-db "0.10.8"
   :description "Redis-based fast sharded set-oriented DB"
   :url "https://github.com/kontera-technologies/meeseeks-db"
   :dependencies [[org.clojure/clojure     "1.9.0"]

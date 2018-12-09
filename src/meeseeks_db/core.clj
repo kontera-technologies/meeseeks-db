@@ -207,6 +207,14 @@
         conn    (f-id->conn data-db id)]
     (wcar conn (fetch-object id fields))))
 
+(defn int?
+  "Return true if x is a fixed precision integer"
+  {:added "1.9"}
+  [x] (or (instance? Long x)
+          (instance? Integer x)
+          (instance? Short x)
+          (instance? Byte x)))
+
 (s/defn query :- {:size s/Int :sample [{Key s/Any}]}
   [client &
    [query :- (s/maybe QueryExpression)
@@ -214,7 +222,7 @@
     fields :- [Key]]]
   (with-open [cursor (c/create-cursor! client (q/compile-query query))]
     {:size   (c/cursor-size cursor)
-     :sample (if (pos-int? sample-size)
+     :sample (if (and (int? sample-size) (pos? sample-size))
                (c/sample-cursor cursor sample-size fields)
                [])}))
 

@@ -226,7 +226,7 @@
                     (when ttl
                       (car/expire name ttl))
                     (when (seq deletes)
-                      (apply car/del deletes))))))]
+                      (apply car/unlink deletes))))))]
       (execute query))))
 
 (s/defn mark-ttls :- Query [query :- Query ttl :- s/Int]
@@ -283,7 +283,7 @@
 (defn cleanup-query [client query]
   (when (:transient? query)
     (run-command @(:db client)
-                 #(wcar % (car/del (:name query)))
+                 #(wcar % (car/unlink (:name query)))
                  conj [])))
 
 (defn stats* [scope scope-sizes reference reference-sizes conn s-query r-query]

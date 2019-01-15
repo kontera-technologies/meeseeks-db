@@ -43,7 +43,7 @@
   (let [k (str "p:" id)]
     (if obj
       (car/hmset* k (freeze-hashmap obj))
-      (car/del k))))
+      (car/unlink k))))
 
 (defn- update-attr! [id prefix old new]
   (let [s1     (set old)
@@ -79,30 +79,21 @@
 
 ;; default id<->iid mappers
 
-#_(defn default-id->iid
-  ([conn id]
-   (if-let [iid (wcar conn (car/get (str "id:" id)))]
-     iid
-     (let [iid (wcar conn (car/incr "next-iid"))]
-       (when iid (car/atomic conn 10
-                     (car/multi)
-                     (car/setnx (str "id:" id) iid)
-                     (car/setnx (str "iid:" iid) id)))
-       (wcar conn (car/get (str "id:" id))))))
-  ([conn id delete?]
-   (wcar conn (car/get (str "id:" id)))))
-
-;hard fix for nil users
 (defn default-id->iid
   ([conn id]
    (if-let [iid (wcar conn (car/get (str "id:" id)))]
-     (do (when (nil? (wcar conn (car/get (str "iid:" iid)))) (wcar conn (car/set (str "iid:" iid) id))) iid)
-     (let [iid (:result (with-lock conn "kona-iid" 20000 50000 (wcar conn (car/incr "next-iid"))))]
-       (when iid (wcar conn
-                       (car/set (str "id:" id) iid)
-                       (car/set (str "iid:" iid) id)
-                       ))
-       iid)))
+     iid
+     (let [iid (wcar conn (car/incr "next-iid"))
+           added? (= 1
+                     (wcar conn
+                           (car/msetnx
+                             (str "id:" id) iid
+                             (str "iid:" iid) id)))]
+       (if added?
+         iid
+         (if-let [final-iid (wcar conn (car/get (str "id:" id)))]
+           final-iid
+           (throw (ex-info (str "Failed to set iid" id iid) {:id id :attempted-iid iid})))))))
   ([conn id delete?]
    (wcar conn (car/get (str "id:" id)))))
 
@@ -234,7 +225,7 @@
                             (fn [ks]
                               (when (seq ks)
                                 (wcar conn
-                                      (apply car/del ks))))))
+                                      (apply car/unlink ks))))))
            data-db))))
 
 (defn memory-status [{:keys [db data-db]}]

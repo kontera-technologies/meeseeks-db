@@ -286,40 +286,39 @@
                  #(wcar % (car/unlink (:name query)))
                  conj [])))
 
-(defn stats* [scope scope-sizes reference reference-sizes conn s-query r-query]
-  (try
-    (let [size-f         (fn [cache conn query]
-                           (if (contains? @cache conn)
-                             (get @cache conn)
-                             (let [size (run-query* query conn)]
-                               (swap! cache assoc conn size)
-                               size)))
-          scope-size     (size-f scope-sizes conn scope)
-          reference-size (size-f reference-sizes conn reference)
-          s-query-size   (run-query* s-query conn)
-          r-query-size   (run-query* r-query conn)
-          g0             (* 1.00 (/ s-query-size (max scope-size 1)))
-          g1             (* 1.25 (/ r-query-size (max reference-size 1)))]
-      [s-query conn s-query-size scope-size r-query-size reference-size (> g0 g1)])
-    (catch Exception ex
-      (locking *out*
-        (st/print-stack-trace ex))
-      [s-query conn -1 -1 -1 -1 false])))
-
-(defn run-stats [jobs scope reference]
+(defn- run-stats [jobs scope reference]
   (let [in-ch           (async/chan)
         out-chs         (for [_ (range (min (count jobs) *max-workers*))]
                           (async/chan))
+
         scope-sizes     (atom {})
-        reference-sizes (atom {})]
+        reference-sizes (atom {})
+        size-f         (fn [cache conn query]
+                         (if (contains? @cache conn)
+                           (get @cache conn)
+                           (let [size (run-query* query conn)]
+                             (swap! cache assoc conn size)
+                             size)))
+        stats* (fn stats* [[conn s-query r-query]]
+                 (try
+                   (let [scope-size     (size-f scope-sizes conn scope)
+                         reference-size (size-f reference-sizes conn reference)
+                         s-query-size   (run-query* s-query conn)
+                         r-query-size   (run-query* r-query conn)
+                         g0             (* 1.00 (/ s-query-size (max scope-size 1)))
+                         g1             (* 1.25 (/ r-query-size (max reference-size 1)))]
+                     [s-query conn s-query-size scope-size r-query-size reference-size (> g0 g1)])
+                   (catch Exception ex
+                     (locking *out*
+                       (st/print-cause-trace ex))
+                     [s-query conn -1 -1 -1 -1 false])))]
+
     (doall
       (for [out-ch out-chs]
         (async/thread
           (loop []
-            (when-some [[conn s-query r-query] (<!! in-ch)]
-              (>!! out-ch (stats* scope scope-sizes
-                                  reference reference-sizes
-                                  conn s-query r-query))
+            (when-some [conn-and-queries (<!! in-ch)]
+              (>!! out-ch (stats* conn-and-queries))
               (recur)))
           (async/close! out-ch)
           :done)))

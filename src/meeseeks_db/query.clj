@@ -175,9 +175,8 @@
 
 (defn- apply-scope [scope query]
   (let [pscope (query-attr (:name scope))]
-    (if (= (:op query) :and)
-      (update-in query [:nested] conj pscope)
-      (query-node :and [pscope query]))))
+    (query-node :and [pscope query])))
+
 (defn- gather-names [query]
   (let [{:keys [name nested transient?]} query]
     (if transient?

@@ -17,6 +17,7 @@
 (ns meeseeks-db.core
   (:require [taoensso.carmine :as car :refer [wcar]]
             [taoensso.carmine.locks :refer [with-lock]]
+            [taoensso.encore :as enc]
             [taoensso.nippy :refer [freeze lzma2-compressor]]
             [clojure.set :refer [difference]]
             [clojure.string :refer [starts-with? replace-first]]
@@ -70,9 +71,9 @@
 (defn- indexify [f-index obj]
   (letfn [(normalize [vs]
             (remove nil? (if (coll? vs) vs [vs])))]
-    (map (fn [[k vs]]
-           [k (normalize vs)])
-         (if (empty? obj) [] (f-index obj)))))
+    (if (empty? obj)
+      {}
+      (enc/map-vals normalize (into {} (f-index obj))))))
 
 ;; ===========================================================================
 ;; API
@@ -153,22 +154,17 @@
         iid         (f-id->iid conn id)
         data-conn   (f-id->conn data-db id)
         old         (wcar data-conn (fetch-object id))
-        index-pairs (merge-with conj
+        index-pairs (merge-with merge
                                 (->> (indexify f-index old)
-                                     (map (fn [[k vs]] [k {:old vs}]))
-                                     (into {}))
+                                     (enc/map-vals #(hash-map :old %)))
                                 (->> (indexify f-index obj)
-                                     (map (fn [[k vs]] [k {:new vs}]))
-                                     (into {})))]
+                                     (enc/map-vals #(hash-map :new %))))]
 
     (when (and iid (not-empty index-pairs))
       (wcar conn
-            (do
-              (when (empty? (car/get (str "iid:" iid)))
-                (car/set (str "iid:" iid) id))
-              (doseq [[k {:keys [old new]}] index-pairs]
-                (update-attr! iid k old new)))
-            (car/sadd "total" iid)))
+        (doseq [[k {:keys [old new]}] index-pairs]
+          (update-attr! iid k old new))
+        (car/sadd "total" iid)))
 
     (wcar data-conn
           (save-object! id obj))

@@ -267,8 +267,8 @@
                              (fn [connection]
 
                                (let [replies (wcar connection
-                                                   (car/parse-suppress
-                                                     (doseq [q queries] (query->command-list q)))
+                                                   (doseq [q queries]
+                                                     (query->command-list q))
                                                    (doseq [q queries]
                                                      (car/return q)
                                                      (car/scard (:name q))))

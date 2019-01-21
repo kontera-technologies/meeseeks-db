@@ -207,21 +207,31 @@
   (let [query-names (-> (gather-names query)
                         set
                         vec)
-        query-ttls (zipmap query-names
-                           (car/parse nil (car/with-replies :as-pipeline
-                                            (doseq [name query-names]
-                                              (car/ttl name)))))
+        query-ttls (atom (zipmap query-names
+                                 (map #(case %
+                                         -1 :no-ttl
+                                         -2 :not-exists
+                                         %)
+                                      (car/parse nil (car/with-replies :as-pipeline
+                                                       (doseq [name query-names]
+                                                         (car/ttl name)))))))
         query (float-deletes query)]
     (letfn [(execute [query]
-              (let [{:keys [op name nested ttl deletes]} query]
-                (when (or (nil? ttl) (< (get query-ttls name 0) min-query-ttl))
+              (let [{:keys [op name nested ttl deletes]} query
+                    expires (get @query-ttls name :not-exists)]
+                (when (and (not= expires :no-ttl)
+                           (or (= expires :not-exists)
+                               (< expires min-query-ttl)))
                   (doseq [q nested]
                     (execute q))
                   (when (seq nested)
-                    (condp = op
-                      :and (apply car/sinterstore name (map :name nested))
-                      :or (apply car/sunionstore name (map :name nested))
-                      :not (apply car/sdiffstore name (map :name nested)))
+                    (let [redis-set-op
+                          (case op
+                            :and car/sinterstore
+                            :or car/sunionstore
+                            :not car/sdiffstore)]
+                      (apply redis-set-op name (map :name nested)))
+                    (swap! query-ttls assoc name (or ttl :no-ttl))
                     (when ttl
                       (car/expire name ttl))
                     (when (seq deletes)

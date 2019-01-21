@@ -203,7 +203,7 @@
     fields :- [Key]]]
   (with-open [cursor (c/create-cursor! client (q/compile-query query))]
     {:size   (c/cursor-size cursor)
-     :sample (if (pos-int? sample-size)
+     :sample (if (enc/pos-int? sample-size)
                (c/sample-cursor cursor sample-size fields)
                [])}))
 

@@ -3,7 +3,7 @@
   :url "https://github.com/kontera-technologies/meeseeks-db"
   :dependencies [[org.clojure/clojure     "1.9.0"]
                  [prismatic/schema        "1.1.9"]
-                 [com.taoensso/carmine    "2.14.0"]
+                 [com.taoensso/carmine    "2.19.1"]
                  [com.taoensso/nippy      "2.12.2"]
                  [clj-time                "0.14.3"]
                  [org.clojure/core.async  "0.4.474"]]

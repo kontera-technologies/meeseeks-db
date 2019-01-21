@@ -43,7 +43,7 @@
   (let [k (str "p:" id)]
     (if obj
       (car/hmset* k (freeze-hashmap obj))
-      (car/del k))))
+      (car/unlink k))))
 
 (defn- update-attr! [id prefix old new]
   (let [s1     (set old)
@@ -79,32 +79,23 @@
 
 ;; default id<->iid mappers
 
-#_(defn default-id->iid
-  ([conn id]
-   (if-let [iid (wcar conn (car/get (str "id:" id)))]
-     iid
-     (let [iid (wcar conn (car/incr "next-iid"))]
-       (when iid (car/atomic conn 10
-                     (car/multi)
-                     (car/setnx (str "id:" id) iid)
-                     (car/setnx (str "iid:" iid) id)))
-       (wcar conn (car/get (str "id:" id))))))
-  ([conn id delete?]
-   (wcar conn (car/get (str "id:" id)))))
-
-;hard fix for nil users
 (defn default-id->iid
   ([conn id]
    (if-let [iid (wcar conn (car/get (str "id:" id)))]
-     (do (when (nil? (wcar conn (car/get (str "iid:" iid)))) (wcar conn (car/set (str "iid:" iid) id))) iid)
-     (let [iid (:result (with-lock conn "kona-iid" 20000 50000 (wcar conn (car/incr "next-iid"))))]
-       (when iid (wcar conn
-                       (car/set (str "id:" id) iid)
-                       (car/set (str "iid:" iid) id)
-                       ))
-       iid)))
+     iid
+     (let [iid (wcar conn (car/incr "next-iid"))
+           added? (= 1
+                     (wcar conn
+                           (car/msetnx
+                             (str "id:" id) iid
+                             (str "iid:" iid) id)))]
+       (if added?
+         iid
+         (if-let [final-iid (wcar conn (car/get (str "id:" id)))]
+           final-iid
+           (throw (ex-info (str "Failed to set iid" id iid) {:id id :attempted-iid iid})))))))
   ([conn id delete?]
-   (wcar conn (car/get (str "id:" id))) ))
+   (wcar conn (car/get (str "id:" id)))))
 
 (defn default-iid->id [iid]
   (car/get (str "iid:" iid)))
@@ -123,11 +114,12 @@
 (s/defschema ClientConfig
   {:f-index (s/pred fn?)
    (s/optional-key :data-db) (deref-of [Connection])
+   (s/optional-key :ttl) (s/maybe s/Int)
    (s/optional-key :f-id->iid) (s/pred fn?)
    (s/optional-key :f-iid->id) (s/pred fn?)
    (s/optional-key :f-id->conn) (s/pred fn?)})
 
-(s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db f-id->iid f-iid->id f-id->conn]
+(s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db ttl f-id->iid f-iid->id f-id->conn]
                                               :or   {f-id->iid  default-id->iid
                                                      f-iid->id  default-iid->id
                                                      f-id->conn default-id->conn}} :- ClientConfig]
@@ -145,6 +137,7 @@
   (assert (ifn? f-index)  "f-index function is mandatory")
   (let [mdb {:db        dbs
              :data-db   (or data-db dbs)
+             :ttl ttl
              :f-id->iid f-id->iid
              :f-id->conn f-id->conn
              :f-iid->id f-iid->id
@@ -240,7 +233,7 @@
                             (fn [ks]
                               (when (seq ks)
                                 (wcar conn
-                                      (apply car/del ks))))))
+                                      (apply car/unlink ks))))))
            data-db))))
 
 (defn memory-status [{:keys [db data-db]}]

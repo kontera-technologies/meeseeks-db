@@ -211,9 +211,6 @@
                (c/sample-cursor cursor sample-size fields)
                [])}))
 
-(defn scan-indices [{:keys [db]} pattern f]
-  (dorun (pmap #(scan-indices* % pattern f) db)))
-
 (defn remove-all! [{:keys [db data-db]}]
   (let [db (deref db)
         data-db (deref data-db)]

@@ -22,6 +22,8 @@
             [taoensso.carmine :as car]
             [schema.test :refer [validate-schemas]]
             [clojure.test.check.generators :as gen]
+            [clojure.test.check.random :as random]
+            [clojure.test.check.rose-tree :as rose]
             [clojure.test.check.properties :as prop]
             [clojure.string :refer [join]]
             [clojure.set :refer [union difference intersection]]
@@ -33,6 +35,14 @@
 (clojure.test/use-fixtures :once validate-schemas)
 
 ;; utils
+
+; For deterministic testing
+(defn sample [gen res-count & [seed]]
+  (let [rngs (gen/lazy-random-states (random/make-random (or seed 7)))
+        sizes (gen/make-size-range-seq 200)]
+    (take res-count (map #(rose/root (gen/call-gen gen %1 %2)) rngs sizes))))
+
+#_(def sample gen/sample)
 
 (defn prop-is? [k v o]
   (= v (get o k)))
@@ -110,7 +120,7 @@
 
 (deftest simple
   (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 100)]
+        profiles (sample profile-gen 100)]
     (index-entities! client profiles)
     (testing "all profiles"
       (is (= (count (distinct (map :id profiles)))
@@ -189,20 +199,18 @@
 
 (facts "about cursors"
   (let [client   (initialize-client profile-indexer)
-        profiles (map-indexed #(assoc %2 :id (str %1)) (gen/sample profile-gen 1000))
+        profiles (map-indexed #(assoc %2 :id (str %1)) (sample profile-gen 1000))
 
         us-males (->> profiles
                       (filter #(and (= (:gender %) :male) (= (:cc %) "us")))
                       (map :id)
-                      distinct
-                      sort)
+                      distinct)
         query    {:gender :male :cc "us"}]
     (index-entities! client profiles)
 
     (let [key-name (with-open [cursor (cursor/create-cursor! client (q/compile-query query))]
                      (fact "create-cursor! works with a compiled query"
-                           (-> (cursor/cursor-seq cursor)
-                               sort) => us-males)
+                           (cursor/cursor-seq cursor) => (m/just us-males :in-any-order))
                      (get-in cursor [:query :name]))]
       (fact "Cursor cleans up after itself"
             (u/run-command @(:db client) #(car/wcar % (car/exists key-name)) + 0)
@@ -210,8 +218,7 @@
     (fact "create-cursor! works with a query expression"
           (with-open [cursor (cursor/create-cursor! client
                                                     query)]
-            (-> (cursor/cursor-seq cursor)
-                sort) => us-males))
+            (cursor/cursor-seq cursor) => (m/just us-males :in-any-order)))
     (when (pos? (count us-males))
       (let [q (sut/query client query (count profiles))]
         (fact "Samples have the right size"
@@ -298,7 +305,7 @@
 
 (deftest run-query
   (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 100)]
+        profiles (sample profile-gen 100)]
     (index-entities! client profiles)
     (testing "all males"
       (let [expected-profiles (filter #(= (:gender %) :male) profiles)
@@ -327,7 +334,7 @@
 
 (deftest queries
   (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 1000)]
+        profiles (sample profile-gen 1000)]
     (index-entities! client profiles)
     (testing "simple query"
       (let [cursor-spec (q/compile-query '(and "cc:us"))
@@ -392,7 +399,7 @@
 
 (deftest scoped-queries
   (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 1000)]
+        profiles (sample profile-gen 1000)]
     (index-entities! client profiles)
     (testing "simple scoped query"
       (let [scope-spec   (q/compile-query '(and "d:yahoo.com"))
@@ -519,7 +526,7 @@
 
 (deftest smart-bulk-bug
   (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 300)]
+        profiles (sample profile-gen 300)]
     (index-entities! client profiles)
     (let [expected-count    (count
                               (intersection
@@ -536,8 +543,7 @@
                     srs (q/bulk-scoped-smarter-queries client common-filters
                                                        (take i (repeat query))
                                                        reference-filters)]]
-        (is (every? (fn [[r sr]]
-                      (and (= expected-count (:size r))
-                           (or (= -1 (:size sr))
-                               (= (:size r) (:size sr)))))
-                    (map vector rs srs)))))))
+        (doseq [[r sr] (map vector rs srs)]
+          (is (= expected-count (:size r)))
+          (when-not (= -1 (:size sr))
+            (is (= (:size r) (:size sr)))))))))

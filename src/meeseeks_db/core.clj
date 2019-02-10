@@ -82,19 +82,20 @@
 
 (defn default-id->iid
   ([conn id]
-   (if-let [iid (wcar conn (car/get (str "id:" id)))]
-     iid
-     (let [iid (wcar conn (car/incr "next-iid"))
-           added? (= 1
-                     (wcar conn
-                           (car/msetnx
-                             (str "id:" id) iid
-                             (str "iid:" iid) id)))]
-       (if added?
-         iid
-         (if-let [final-iid (wcar conn (car/get (str "id:" id)))]
-           final-iid
-           (throw (ex-info (str "Failed to set iid" id iid) {:id id :attempted-iid iid})))))))
+   (let [id-key (str "id:" id)]
+     (if-let [iid (wcar conn (car/get id-key))]
+       iid
+       (let [iid    (wcar conn (car/incr "next-iid"))
+             added? (= 1
+                       (wcar conn
+                         (car/msetnx
+                           id-key iid
+                           (str "iid:" iid) id)))]
+         (if added?
+           iid
+           (if-let [final-iid (wcar conn (car/get id-key))]
+             final-iid
+             (throw (ex-info (str "Failed to set iid " id iid) {:id id :attempted-iid iid}))))))))
   ([conn id delete?]
    (wcar conn (car/get (str "id:" id)))))
 

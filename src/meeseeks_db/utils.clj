@@ -32,7 +32,7 @@
 (s/defschema Op (s/enum :and :or :not 'and 'or 'not "and" "or" "not"))
 (s/defschema Key Named)
 (s/defschema Value (s/either Named s/Num))
-(s/defschema Attr (s/constrained Named #(re-find #"^([^:]+:[^:]+|total)$" (name %)) 'Attr))
+(s/defschema Attr (s/constrained Named #(re-find #"^([^:]+:[^:]+|total|empty)$" (name %)) 'Attr))
 
 (s/defschema QueryMap
   {(s/either Key [Key] #{Key}) (s/either Value [Value] #{Value})})

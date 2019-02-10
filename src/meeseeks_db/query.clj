@@ -36,11 +36,17 @@
 
 (def ^:private ^:dynamic *ttl* nil)
 (def ^:private ^:dynamic *query-nonce* nil)
+
+(def ^:private TOTAL "total")
+(def ^:private EMPTY "empty")
+
 (s/defn ^:private query-node :- Query
   [op :- Op
    nested :- [Query]]
-  (let [keys (map (comp name :name) nested)
-        keys (into (if *ttl* #{} #{(or *query-nonce* (rand-int 999999))}) keys)]
+  (let [op   (keyword op)
+        all_keys (map (comp name :name) nested)
+        keys (into (if *ttl* #{} #{(or *query-nonce* (rand-int 999999))}) all_keys)
+        keys (if (= op :not) [(first all_keys) keys] keys)]
     (->Query (str "tmp:" (name op) \_ (hash keys))
              true
              (keyword op)
@@ -71,7 +77,7 @@
    (cond
      (set? ks) (cons :and (map #(filter->query % vs) ks))
      (sequential? ks) (cons :or (map #(filter->query % vs) ks))
-     (and (coll? vs) (empty? vs)) "total"
+     (and (coll? vs) (empty? vs)) TOTAL
      :else (let [vs             (if (coll? vs) vs [vs])
                  op             (if (set? vs) :and :or)
                  negated?       #(and (string? %) (starts-with? % "!"))
@@ -82,12 +88,12 @@
                  (if (seq exclude)
                    (cons :not
                          (case (count include)
-                           0 (apply list "total" (map negated->query exclude))
+                           0 (apply list TOTAL (map negated->query exclude))
                            1 (apply list (c->q (first include)) (map negated->query exclude))
                            (apply list (cons op (map c->q include)) (map negated->query exclude))))
                    (cons op (map c->q vs))))
                (if (negated? (first vs))
-                 (list :not "total" (negated->query (first vs)))
+                 (list :not TOTAL (negated->query (first vs)))
                  (c->q (first vs))))))))
 
 (comment
@@ -107,8 +113,16 @@
 (s/defn ^:private simplify-not-expression :- QueryExpression
   [[scope & removals] :- [QueryExpression]]
   (if (empty? removals)
-    (list :not "total" scope)
-    (apply list :not scope removals)))
+    (simplify-not-expression [TOTAL scope])
+    (let [removals (disj (set removals) EMPTY)]
+      (cond
+        (empty? removals)
+        scope
+        (or (= scope EMPTY)
+            (seq (set/intersection (set [scope TOTAL]) removals)))
+        EMPTY
+        :else
+        (apply list :not scope removals)))))
 (defn- op-expression?
   ([op]
    (fn [expr] (op-expression? op expr)))
@@ -130,26 +144,32 @@
             same-op? (op-expression? op)
             args (map simplify (rest expr))
             uniq-args (set args)
-            uniq-args (if (= op :and) (disj uniq-args "total")
-                                      uniq-args)
+            uniq-args (case op
+                        :and (disj uniq-args TOTAL)
+                        :or (disj uniq-args EMPTY)
+                        uniq-args)
             {neg-args true pos-args false} (group-by not-expression? uniq-args)]
-        (cond (= op :not)
-              (simplify-not-expression args)
-              (= 1 (count uniq-args))
-              (recur (first uniq-args))
-              (some same-op? uniq-args)
-              (recur (apply list op (mapcat #(if (same-op? %) (rest %) [%]) uniq-args)))
-              (not-empty neg-args)
-              (simplify-not-expression (cons (if-let [scope (not-empty (set (concat pos-args
-                                                                                    (remove #(= % "total")
-                                                                                            (map second neg-args)))))]
-                                               (simplify (apply list op scope))
-                                               "total")
-                                             (mapcat nnext neg-args)))
-              (and (= op :or) (some #(= "total" %) uniq-args))
-              "total"
-              :else
-              (apply list op uniq-args)))
+        (cond (= op :not) (simplify-not-expression args)
+              (= 1 (count uniq-args)) (recur (first uniq-args))
+              (= 0 (count uniq-args)) (case op
+                                        :and TOTAL
+                                        :or EMPTY)
+              (some same-op? uniq-args) (recur
+                                          (apply list op
+                                                 (mapcat
+                                                   #(if (same-op? %) (rest %) [%])
+                                                   uniq-args)))
+              (and (= op :or) (contains? uniq-args TOTAL)) TOTAL
+              (and (= op :and) (contains? uniq-args EMPTY)) EMPTY
+              (and (= op :and) (not-empty neg-args)) (simplify-not-expression
+                                                       (cons (if-let [scope (not-empty (->> neg-args (map second)
+                                                                                            (remove #(= % TOTAL))
+                                                                                            (concat pos-args)
+                                                                                            (set)))]
+                                                               (simplify (apply list op scope))
+                                                               TOTAL)
+                                                             (mapcat nnext neg-args)))
+              :else (apply list op uniq-args)))
       :else
       expr)))
 
@@ -157,10 +177,10 @@
   (cond
     (sequential? q) (let [[op & args] q]
                       (if (= 0 (count args))
-                        (query-attr "total")
+                        (query-attr TOTAL)
                         (query-node op (map compile-query* args))))
     (associative? q) (assert "This should never happen: maps should have been simplified")
-    :else (query-attr (or q "total"))))
+    :else (query-attr (or q TOTAL))))
 
 (s/defn compile-query :- Query
   [q :- QueryExpression & [ttl]]
@@ -267,7 +287,7 @@
 (s/defn run-query! :- s/Int [client query :- Query]
   "Creates a cursor and returns the size of the resulting query"
   (let [query (cond-> query
-                      (:ttl client) (mark-ttls query (:ttl client)))]
+                      (:ttl client) (mark-ttls (:ttl client)))]
     (run-command @(:db client)
                  (partial run-query* query)
                  (fnil + 0 0) 0)))

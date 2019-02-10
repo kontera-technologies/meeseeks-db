@@ -36,7 +36,7 @@
 (defn cleanup-db! [{:keys [db]}]
   (let [db (deref db)]
     (doseq [conn db]
-     (wcar conn (car/flushall)))))
+      (wcar conn (car/flushall)))))
 
 (defn initialize-client
   "Initializes meeseeks-db client.
@@ -45,14 +45,14 @@
   You can overwrite the docker host by binding *docker-host* variable to another value.
   Will clean the database after opening connections!"
   [f-index]
-  (let [docker-host (or *docker-host* (System/getenv "DOCKER_HOST"))
-        redis-host  (if docker-host
-                      (last (re-find #"tcp://([^:]+):.*$" docker-host))
-                      "localhost")
-        redis-uris  (map #(str "redis://" redis-host ":" %) redis-ports)
+  (let [docker-host   (or *docker-host* (System/getenv "DOCKER_HOST"))
+        redis-host    (if docker-host
+                        (last (re-find #"tcp://([^:]+):.*$" docker-host))
+                        "localhost")
+        redis-uris    (map #(str "redis://" redis-host ":" %) redis-ports)
         redis-configs (for [uri redis-uris] {:pool {} :spec {:uri uri :timeout-ms 8000}})
-        client      (c/init (atom redis-configs)
-                            {:f-index f-index})]
+        client        (c/init (atom redis-configs)
+                              {:f-index f-index})]
     (cleanup-db! client)
     client))
 
@@ -62,7 +62,7 @@
 
 ; For deterministic testing
 (defn sample [gen res-count & [seed]]
-  (let [rngs (gen/lazy-random-states (random/make-random (or seed 7)))
+  (let [rngs  (gen/lazy-random-states (random/make-random (or seed 7)))
         sizes (gen/make-size-range-seq 200)]
     (take res-count (map #(rose/root (gen/call-gen gen %1 %2)) rngs sizes))))
 
@@ -78,14 +78,14 @@
   (prop-has? :td domain o))
 
 (m/defchecker attr [name]
-              (m/every-checker
-                (m/contains {:name name :transient? false})))
+  (m/every-checker
+    (m/contains {:name name :transient? false})))
 
 (m/defchecker node [op & children]
-              (m/contains {:name       (m/has-prefix "tmp:")
-                           :op         op
-                           :transient? true
-                           :nested     (m/just children :in-any-order)}))
+  (m/contains {:name       (m/has-prefix "tmp:")
+               :op         op
+               :transient? true
+               :nested     (m/just children :in-any-order)}))
 ;; generators
 
 (def property-gen
@@ -136,10 +136,10 @@
   (let [make-foo (fn [gen] (gen/one-of [gen (gen/vector gen) (gen/set gen)]))]
     (gen/recursive-gen (fn [inner] (gen/one-of [(gen/let [op    (gen/elements [:and :or :not])
                                                           items (gen/not-empty (gen/vector inner))]
-                                                         (cons op items))]))
+                                                  (cons op items))]))
                        (gen/let [ks (gen/not-empty (gen/vector-distinct (gen/elements (keys (dissoc profile-gen-map :id)))))
                                  vs (apply gen/tuple (map #(get profile-gen-map % (gen/return :whoops)) ks))]
-                                (zipmap ks vs)))))
+                         (zipmap ks vs)))))
 
 (defn normalize-query [query]
   (prewalk (fn [node]
@@ -150,7 +150,7 @@
                :else node)) query))
 (defn local-eval [population query]
   (let [population (set population)
-        pop-ids (into #{} (map :id) population)]
+        pop-ids    (into #{} (map :id) population)]
     (letfn [(to-str [x]
               (cond
                 (number? x) (str x)
@@ -194,9 +194,8 @@
 
            (into #{} (map #(hash-map :id %)))))))
 
-(defn local-eval [population query]
-  (let [population (set population)
-        pop-ids (into #{} (map :id) population)]
+(defn local-eval [population query & fields]
+  (let [population (set population)]
     (letfn [(to-str [x]
               (cond
                 (number? x) (str x)
@@ -230,7 +229,7 @@
                   :or (apply some-fn args)
                   :not (if (< (count args) 2)
                          (comp not (first args))
-                         (apply every-pred (first args) (map #(comp not %)) (rest args))))))]
+                         (apply every-pred (first args) (map #(comp not %) (rest args)))))))]
       (let [pred (->> query
                       (normalize-query)
                       (postwalk (fn [node]
@@ -238,7 +237,7 @@
                                     (sequential? node) (op->predicate node)
                                     (string? node) (item->predicate node)
                                     :else node))))]
-        (into #{} (comp (filter pred) (map :id)) population)))))
+        (into #{} (comp (filter pred) (map #(select-keys % (or fields [:id])))) population)))))
 
 (defn bury-negations
   "Convert query to form with no :not nodes, and any negated leaves marked with ! prefix"
@@ -271,7 +270,7 @@
                           (cons (first expr) (map rewrite (rest expr))))]
               x))]
 
-    (rewrite query)))
+    (postwalk rewrite query)))
 
 (defn satisfiable? [query]
   (let [vars (atom {})]
@@ -311,24 +310,24 @@
                                  (string? node) (item->predicate node)
                                  :else node)))))]
       (seq (l/run-nc 1 [q]
-                  (convert-query query)
-                  (l/== q @vars))))))
+                     (convert-query query)
+                     (l/== q @vars))))))
 (defn logic-same
   "Test if two queries are the same. Returns nil if they are, and a counter-example otherwise"
   [query1 query2]
   (satisfiable? [:and query1 [:not query2]]))
 
 (def index-map
-  {:gender :gender
-   :age :age
-   :income :income
-   :cc :cc
+  {:gender            :gender
+   :age               :age
+   :income            :income
+   :cc                :cc
    :frequent-keywords :f
-   :uw :u
-   :gsw :s
-   :td :d
-   :race :race
-   :zipcode :z})
+   :uw                :u
+   :gsw               :s
+   :td                :d
+   :race              :race
+   :zipcode           :z})
 (defn profile-indexer [obj]
   (vec (for [[key index] index-map]
          [index (get obj key)])))

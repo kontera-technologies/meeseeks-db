@@ -147,28 +147,42 @@
 
 (defn index!
   "Index and store an object."
-  [{:keys [db data-db f-id->iid f-index f-id->conn]} {:keys [id] :as obj}]
+  [{:keys [db data-db f-id->iid f-index f-id->conn]} & objects]
   (let [db          (deref db)
         data-db     (deref data-db)
-        conn        (f-id->conn db id)
-        iid         (f-id->iid conn id)
-        data-conn   (f-id->conn data-db id)
-        old         (wcar data-conn (fetch-object id))
-        index-pairs (merge-with merge
-                                (->> (indexify f-index old)
-                                     (enc/map-vals #(hash-map :old %)))
-                                (->> (indexify f-index obj)
-                                     (enc/map-vals #(hash-map :new %))))]
-
-    (when (and iid (not-empty index-pairs))
-      (wcar conn
-        (doseq [[k {:keys [old new]}] index-pairs]
-          (update-attr! iid k old new))
-        (car/sadd "total" iid)))
-
-    (wcar data-conn
-          (save-object! id obj))
-    [id iid data-conn]))
+        conns  (group-by #(f-id->conn db (:id %)) objects)
+        data-conns (group-by #(f-id->conn data-db (:id %)) objects)
+        old (merge (pmap (fn [[data-conn ids]]
+                           (zipmap ids (wcar data-conn (doseq [id ids]
+                                                         (fetch-object id))))) data-conns))]
+    (dorun (pmap (fn [[conn objects]]
+                   (let [ids (map :id objects)
+                         iids (zipmap ids (map #(f-id->iid conn (:id %)) objects))
+                         updates (into {} (for [obj objects
+                                                :let [id (:id obj)
+                                                      old (get old id)]]
+                                            [id (merge-with merge
+                                                            (->> (indexify f-index old)
+                                                                 (enc/map-vals #(hash-map :old %)))
+                                                            (->> (indexify f-index obj)
+                                                                 (enc/map-vals #(hash-map :new %))))]))]
+                     (when (some not-empty updates)
+                       (wcar conn
+                         (doseq [obj objects
+                                 :let [id (:id obj)
+                                       index-pairs (get updates id)
+                                       iid (get iids id)]]
+                           (doseq [[k {:keys [old new]}] index-pairs]
+                             (update-attr! iid k old new))
+                           (apply car/sadd "total" (vals iids)))))))
+                 conns))
+    (dorun (pmap (fn [[data-conn objects]]
+                   (wcar data-conn
+                     (doseq [obj objects
+                             :let [id (:id obj)]]
+                       (save-object! id obj))))
+                 data-conns)))
+  #_  [id iid data-conn])
 
 (defn unindex!
   "Remove the object and its indices."

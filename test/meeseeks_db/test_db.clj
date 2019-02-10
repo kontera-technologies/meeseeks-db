@@ -57,7 +57,7 @@
     client))
 
 (defn index-entities! [client entities]
-  (r/foldcat (r/map (partial c/index! client) entities)))
+  (apply c/index! client entities))
 
 
 ; For deterministic testing

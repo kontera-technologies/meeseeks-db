@@ -17,6 +17,11 @@
                    :dependencies [[org.clojure/tools.nrepl "0.2.12"]
                                   [org.clojure/tools.namespace "0.2.11"]
                                   [org.clojure/test.check  "0.9.0"]
+                                  [com.gfredericks/test.chuck "0.2.9"]
+                                  [org.clojure/core.logic "0.8.11"]
+                                  [criterium "0.4.4"]
                                   [midje                   "1.9.1"]]
                    :plugins [[lein-midje "3.2.1"]]}
+             :1.8 {
+                   :dependencies [[org.clojure/clojure "1.8.0"]]}
              :repl {:plugins [[com.billpiel/sayid "0.0.10"]]}})

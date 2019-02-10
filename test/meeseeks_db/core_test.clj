@@ -18,105 +18,31 @@
   (:require [meeseeks-db.core :as sut]
             [clojure.test :refer [deftest testing is]]
             [midje.sweet :refer [facts fact =>] :as m]
-            [clojure.test.check :as tc]
             [taoensso.carmine :as car]
             [schema.test :refer [validate-schemas]]
             [clojure.test.check.generators :as gen]
-            [clojure.test.check.random :as random]
-            [clojure.test.check.rose-tree :as rose]
             [clojure.test.check.properties :as prop]
+            [clojure.test.check.clojure-test :as tct]
+            [clojure.walk :refer [postwalk prewalk]]
             [clojure.string :refer [join]]
             [clojure.set :refer [union difference intersection]]
-            [meeseeks-db.test-db :refer [initialize-client index-entities!]]
+            [meeseeks-db.test-db :refer [initialize-client
+                                         index-entities!
+                                         sample
+                                         local-eval
+                                         profile-gen
+                                         property-gen
+                                         node
+                                         attr
+                                         prop-is?
+                                         prop-visited?
+                                         profile-indexer
+                                         query-gen]]
             [meeseeks-db.query :as q]
             [meeseeks-db.utils :as u]
             [meeseeks-db.cursor :as cursor]))
 
 (clojure.test/use-fixtures :once validate-schemas)
-
-;; utils
-
-; For deterministic testing
-(defn sample [gen res-count & [seed]]
-  (let [rngs (gen/lazy-random-states (random/make-random (or seed 7)))
-        sizes (gen/make-size-range-seq 200)]
-    (take res-count (map #(rose/root (gen/call-gen gen %1 %2)) rngs sizes))))
-
-#_(def sample gen/sample)
-
-(defn prop-is? [k v o]
-  (= v (get o k)))
-
-(defn prop-has? [k v o]
-  (boolean ((set (get o k)) v)))
-
-(defn prop-visited? [domain o]
-  (prop-has? :td domain o))
-
-(m/defchecker attr [name]
-  (m/every-checker
-    (m/contains {:name name :transient? false})))
-
-(m/defchecker node [op & children]
-  (m/contains {:name (m/has-prefix "tmp:")
-               :op op
-               :transient? true
-               :nested (m/just children :in-any-order)}))
-;; generators
-
-(def property-gen
-  (gen/hash-map
-           :id          (gen/fmap (fn [id] (str "P" id)) gen/pos-int)
-            :datatype    (gen/elements [:string :quantity :globe-coordinate :wikimedia-item :time])
-            :label       (gen/not-empty gen/string-alphanumeric)
-            :description gen/string-alphanumeric))
-(def profile-gen
-  (gen/hash-map
-    :id                gen/uuid
-     :gender            (gen/elements [:male :female])
-     :age               (gen/elements [:2-11 :12-17 :18-24 :25-34 :35-44 :45-54 :55-64 :65+])
-     :income            (gen/elements [:0-15k :15-25k :25-40k :40-60k :60-75k :75-100k :100k+])
-     :race              (gen/elements [:black :white])
-     :cc                (gen/elements ["us" "gb" "sg"])
-     :frequent-keywords (gen/list-distinct
-                          (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
-                                          [2 (gen/large-integer* {:min 10 :max 40000000})]]))
-     :uw                (gen/list-distinct
-                          (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
-                                          [2 (gen/large-integer* {:min 10 :max 40000000})]]))
-     :gsw               (gen/list-distinct
-                          (gen/frequency [[1 (gen/elements [1 2 3 4 5 6 7 8 9 10])]
-                                          [2 (gen/large-integer* {:min 10 :max 40000000})]]))
-     :td                (gen/list-distinct
-                          (gen/frequency [[1 (gen/elements ["google.com"
-                                                            "facebook.com"
-                                                            "yahoo.com"
-                                                            "youtube.com"
-                                                            "bing.com"
-                                                            "duckduckgo.com"])]
-                                          [2 (gen/fmap (fn [[name suffix]]
-                                                         (str name \. suffix))
-                                                       (gen/tuple (gen/fmap join
-                                                                            (gen/vector gen/char-alphanumeric 1 10))
-                                                                  (gen/elements ["com"
-                                                                                 "co.il"
-                                                                                 "ca"
-                                                                                 "co.uk"
-                                                                                 "com.sg"])))]]))
-     :zipcode           (gen/fmap str (gen/large-integer* {:min 10000 :max 99999}))))
-
-(defn profile-indexer [obj]
-  [[:gender (:gender obj)]
-   [:age (:age obj)]
-   [:income (:income obj)]
-   [:cc (:cc obj)]
-   [:f (:frequent-keywords obj)]
-   [:u (:uw obj)]
-   [:s (:gsw obj)]
-   [:d (:td obj)]
-   [:race (:race obj)]
-   [:z (:zipcode obj)]])
-
 
 (deftest simple
   (let [client   (initialize-client profile-indexer)
@@ -165,8 +91,13 @@
                                        :d      ["yahoo.com" "!google.com"]}
                                1 [:td])
             profile (first (:sample res))]
-        (is (and (some #{"yahoo.com"} (:td profile))
-                 (not (some #{"google.com"} (:td profile)))))))))
+        (and
+
+          (is (> (:size res) 0))
+          (is (some? profile))
+          (is (some? (:td profile)))
+          (is (some #{"yahoo.com"} (:td profile)))
+          (is (not (some #{"google.com"} (:td profile)))))))))
 
 (deftest no-indices
   (let [client   (initialize-client (fn [_obj] nil))

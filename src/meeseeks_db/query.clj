@@ -110,19 +110,6 @@
        (map filter->query)
        (cons :and)))
 
-(s/defn ^:private simplify-not-expression :- QueryExpression
-  [[scope & removals] :- [QueryExpression]]
-  (if (empty? removals)
-    (simplify-not-expression [TOTAL scope])
-    (let [removals (disj (set removals) EMPTY)]
-      (cond
-        (empty? removals)
-        scope
-        (or (= scope EMPTY)
-            (seq (set/intersection (set [scope TOTAL]) removals)))
-        EMPTY
-        :else
-        (apply list :not scope removals)))))
 (defn- op-expression?
   ([op]
    (fn [expr] (op-expression? op expr)))
@@ -130,48 +117,80 @@
    (and (sequential? expr)
         (= op (keyword (first expr))))))
 
+(defn- superset? [super-query sub-query]
+  (or
+    (= super-query sub-query)
+    (= super-query TOTAL)
+    (= sub-query EMPTY)
+    (and (op-expression? :or super-query)
+         (some #(superset? % sub-query) (rest super-query)))
+    (and (op-expression? :and sub-query)
+         (some #(superset? super-query %) (rest sub-query)))))
+
 (defn- not-expression? [query]
   (op-expression? :not query))
+(declare simplify)
+(s/defn ^:private simplify-not-expression :- QueryExpression
+  [[scope & removals] :- [QueryExpression]]
+  (if (empty? removals)
+    (simplify-not-expression [TOTAL scope])
+    (let [complements (filter #(and (not-expression? %) (= scope (second %))) removals)
+          scope       (if (seq complements)
+                        (simplify (apply list :and scope (map #(cons :or (nnext %)) complements)))
+                        scope)
+          ors         (filter (op-expression? :or) removals)
+          removals    (apply disj (set (concat removals (mapcat next ors))) EMPTY (concat complements ors))]
+      (let [expr (cond
+                   (empty? removals)
+                   scope
+                   (or (= scope EMPTY)
+                       (seq (set/intersection (set [scope TOTAL]) removals)))
+                   EMPTY
+                   :else
+                   (apply list :not scope removals))]
+        expr))))
 
 (s/defn ^:private simplify :- QueryExpression
   [expr :- QueryExpression]
-  (loop [expr expr]
-    (cond
-      (satisfies? Queryable expr)
-      (recur (->query-expression expr))
-      (sequential? expr)
-      (let [op   (keyword (first expr))
-            same-op? (op-expression? op)
-            args (map simplify (rest expr))
-            uniq-args (set args)
-            uniq-args (case op
-                        :and (disj uniq-args TOTAL)
-                        :or (disj uniq-args EMPTY)
-                        uniq-args)
-            {neg-args true pos-args false} (group-by not-expression? uniq-args)]
-        (cond (= op :not) (simplify-not-expression args)
-              (= 1 (count uniq-args)) (recur (first uniq-args))
-              (= 0 (count uniq-args)) (case op
-                                        :and TOTAL
-                                        :or EMPTY)
-              (some same-op? uniq-args) (recur
-                                          (apply list op
-                                                 (mapcat
-                                                   #(if (same-op? %) (rest %) [%])
-                                                   uniq-args)))
-              (and (= op :or) (contains? uniq-args TOTAL)) TOTAL
-              (and (= op :and) (contains? uniq-args EMPTY)) EMPTY
-              (and (= op :and) (not-empty neg-args)) (simplify-not-expression
-                                                       (cons (if-let [scope (not-empty (->> neg-args (map second)
-                                                                                            (remove #(= % TOTAL))
-                                                                                            (concat pos-args)
-                                                                                            (set)))]
-                                                               (simplify (apply list op scope))
-                                                               TOTAL)
-                                                             (mapcat nnext neg-args)))
-              :else (apply list op uniq-args)))
-      :else
-      expr)))
+  (let [expr
+        (loop [expr expr]
+          (cond
+            (satisfies? Queryable expr)
+            (recur (->query-expression expr))
+            (sequential? expr)
+            (let [op        (keyword (first expr))
+                  same-op?  (op-expression? op)
+                  args      (map simplify (rest expr))
+                  uniq-args (set args)
+                  uniq-args (case op
+                              :and (disj uniq-args TOTAL)
+                              :or (disj uniq-args EMPTY)
+                              uniq-args)
+                  {neg-args true pos-args false} (group-by not-expression? uniq-args)]
+              (cond (= op :not) (simplify-not-expression args)
+                    (= 1 (count uniq-args)) (recur (first uniq-args))
+                    (= 0 (count uniq-args)) (case op
+                                              :and TOTAL
+                                              :or EMPTY)
+                    (some same-op? uniq-args) (recur
+                                                (apply list op
+                                                       (mapcat
+                                                         #(if (same-op? %) (rest %) [%])
+                                                         uniq-args)))
+                    (and (= op :or) (contains? uniq-args TOTAL)) TOTAL
+                    (and (= op :and) (contains? uniq-args EMPTY)) EMPTY
+                    (and (= op :and) (not-empty neg-args)) (simplify-not-expression
+                                                             (cons (if-let [scope (not-empty (->> neg-args (map second)
+                                                                                                  (remove #(= % TOTAL))
+                                                                                                  (concat pos-args)
+                                                                                                  (set)))]
+                                                                     (simplify (apply list op scope))
+                                                                     TOTAL)
+                                                                   (mapcat nnext neg-args)))
+                    :else (apply list op uniq-args)))
+            :else
+            expr))]
+    expr))
 
 (defn- compile-query* [q]
   (cond

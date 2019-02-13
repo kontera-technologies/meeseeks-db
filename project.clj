@@ -1,7 +1,7 @@
 (defproject com.amobee/meeseeks-db "0.10.7"
   :description "Redis-based fast sharded set-oriented DB"
   :url "https://github.com/kontera-technologies/meeseeks-db"
-  :dependencies [[org.clojure/clojure     "1.9.0"]
+  :dependencies [[org.clojure/clojure     "1.10.0-RC5"]
                  [prismatic/schema        "1.1.9"]
                  [com.taoensso/carmine    "2.19.1"]
                  [com.taoensso/nippy      "2.12.2"]
@@ -19,6 +19,7 @@
                                   [org.clojure/test.check  "0.9.0"]
                                   [com.gfredericks/test.chuck "0.2.9"]
                                   [org.clojure/core.logic "0.8.11"]
+                                  [rolling-stones "1.0.0-SNAPSHOT"]
                                   [criterium "0.4.4"]
                                   [midje                   "1.9.1"]]
                    :plugins [[lein-midje "3.2.1"]]}

@@ -21,6 +21,7 @@
             [meeseeks-db.utils :as u]
             [clojure.core.logic :as l]
             [clojure.core.logic.fd :as lf]
+            [rolling-stones.core :as sat]
             [clojure.set :as set]
             [clojure.walk :refer [prewalk postwalk]]
             [clojure.string :as string]
@@ -134,10 +135,12 @@
 
 (def query-gen
   (let [make-foo (fn [gen] (gen/one-of [gen (gen/vector gen) (gen/set gen)]))]
-    (gen/recursive-gen (fn [inner] (gen/one-of [(gen/let [op    (gen/elements [:and :or :not])
-                                                          items (gen/not-empty (gen/vector inner))]
-                                                  (cons op items))]))
-                       (gen/let [ks (gen/not-empty (gen/vector-distinct (gen/elements (keys (dissoc profile-gen-map :id)))))
+    (gen/recursive-gen (fn [inner] (gen/one-of [(gen/let [op    (gen/elements [:and :or])
+                                                          items (gen/vector inner)]
+                                                  (cons op items))
+                                                (gen/let [items (gen/not-empty (gen/vector inner))]
+                                                  (cons :not items))]))
+                       (gen/let [ks (gen/not-empty (gen/vector-distinct (gen/elements [:gender :age :income :race :cc])))
                                  vs (apply gen/tuple (map #(get profile-gen-map % (gen/return :whoops)) ks))]
                          (zipmap ks vs)))))
 
@@ -194,7 +197,7 @@
 
            (into #{} (map #(hash-map :id %)))))))
 
-(defn local-eval [population query & fields]
+(defn local-eval [population query & [fields]]
   (let [population (set population)]
     (letfn [(to-str [x]
               (cond
@@ -221,8 +224,8 @@
               (assert (#{:and :or :not} op) (str "was actually " (pr-str op)))
               (if (= 0 (count args))
                 (case (keyword (name op))
-                  :or (constantly true)
-                  :and (constantly false)
+                  :or (constantly false)
+                  :and (constantly true)
                   :not (throw (ex-info "'not' without arguments" {})))
                 (case (keyword (name op))
                   :and (apply every-pred args)
@@ -237,7 +240,7 @@
                                     (sequential? node) (op->predicate node)
                                     (string? node) (item->predicate node)
                                     :else node))))]
-        (into #{} (comp (filter pred) (map #(select-keys % (or fields [:id])))) population)))))
+        (into #{} (comp (filter pred) (map #(select-keys % (cons :id fields)))) population)))))
 
 (defn bury-negations
   "Convert query to form with no :not nodes, and any negated leaves marked with ! prefix"
@@ -274,32 +277,28 @@
 
 (defn satisfiable? [query]
   (let [vars (atom {})]
-    (letfn [(get-var [name]
-              (if-let [var (get @vars name)]
-                var
-                (let [v (l/lvar name)]
-                  (swap! vars assoc name v)
-                  v)))
-            (item->predicate [s]
+    (letfn [(item->predicate [s]
               (case s
-                "total" l/succeed
-                "empty" l/fail
+                "total" :TRUE
+                "empty" :FALSE
                 (do
                   (assert (string/includes? s ":") (str "weird key " s))
                   (let [[name target] (if (string/starts-with? s "!")
                                         [(subs s 1) false]
                                         [s true])]
-                    (l/== (get-var name) target)))))
+                    (if target
+                      name
+                      (sat/NOT name))))))
             (op->predicate [[op & args]]
               (assert (#{:and :or :not} op) (str "was actually " (pr-str op)))
               (case (count args)
                 0 (case (keyword (name op))
-                    :or l/succeed
-                    :and l/fail)
+                    :or :FALSE
+                    :and :TRUE)
                 1 (first args)
                 (case (keyword (name op))
-                  :and (l/and* args)
-                  :or (l/or* args))))
+                  :and (apply sat/AND args)
+                  :or (apply sat/OR args))))
             (convert-query [query]
               (->> query
                    (normalize-query)
@@ -309,9 +308,8 @@
                                  (sequential? node) (op->predicate node)
                                  (string? node) (item->predicate node)
                                  :else node)))))]
-      (seq (l/run-nc 1 [q]
-                     (convert-query query)
-                     (l/== q @vars))))))
+      (sat/solve-symbolic-formula (sat/AND :TRUE (sat/NOT :FALSE) (convert-query query))))))
+
 (defn logic-same
   "Test if two queries are the same. Returns nil if they are, and a counter-example otherwise"
   [query1 query2]

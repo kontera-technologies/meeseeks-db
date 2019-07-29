@@ -46,13 +46,12 @@
            false
            nil
            nil))
+
 (defn- filter-value->query [k v]
   (cond
     (vector? v) (cons :or (map #(filter-value->query k %) v))
     (set? v) (cons :and (map #(filter-value->query k %) v))
     :else (attr k v)))
-
-
 
 (defn- filter->query
   ([[ks vs]]

@@ -23,7 +23,7 @@
             [meeseeks-db.query :as q]
             [meeseeks-db.cursor :as c]
             [schema.core :as s]
-            [meeseeks-db.utils :refer [fetch-object QueryExpression Key Value deref-of]])
+            [meeseeks-db.utils :refer [fetch-object QueryExpression Key Value deref-of mangle-keys]])
   (:import [clojure.lang Murmur3]))
 
 ;; ===========================================================================
@@ -31,6 +31,7 @@
 
 (defn attr [key value]
   (meeseeks-db.utils/attr key value))
+
 (defn- freeze-hashmap [m]
   (->> m
        (map (fn [[k v]]
@@ -109,10 +110,13 @@
 (defn default-iid->id [iid]
   (car/get (str "iid:" iid)))
 
+(defn get-db-number [id number-of-dbs]
+  (let [hc (Murmur3/hashUnencodedChars (str id))]
+    (mod hc number-of-dbs)))
+
 (defn default-id->conn [db id]
   (if (> (count db) 1)
-    (let [hc (Murmur3/hashUnencodedChars (str id))]
-      (nth db (mod hc (count db))))
+    (nth db (get-db-number id (count db)))
     (first db)))
 
 ;; API
@@ -215,16 +219,46 @@
           (instance? Short x)
           (instance? Byte x)))
 
+(defn split-ids-by-db [client ids]
+  (let [number-of-dbs (count (:data-db client))
+        id-buckets (vec (repeat number-of-dbs []))]
+    (reduce (fn [id-arrays id]
+              (let [db-number (get-db-number id number-of-dbs)]
+                (assoc id-arrays db-number (conj (nth id-arrays db-number) id)))) id-buckets ids)))
+
+
+(defn delete-custom-attribute [{:keys [db] :as client} name]
+  (let [db (deref (:db db))]
+    (pmap #(wcar % (car/del (str "custom:" name))) db)))
+
+(defn create-custom-attribute [{:keys [db] :as client} attribute-name ids]
+  (let [db (deref (:db db))
+        db-buckets (split-ids-by-db client ids)]
+    (pmap (fn [db ids]
+            (when (not-empty ids)
+              (let [iids (wcar db (apply car/mget (map #(str "id:" %) ids)))
+                    key-name (str "custom:" (name attribute-name))]
+                (wcar db
+                      (apply car/sadd  iids)
+                      (car/expire key-name 3600)
+                      )))) db db-buckets)))
+
 (s/defn query :- {:size s/Int :sample [{Key s/Any}]}
   [client &
    [query :- (s/maybe QueryExpression)
     sample-size :- (s/maybe s/Int)
-    fields :- [Key]]]
-  (with-open [cursor (c/create-cursor! client (q/compile-query query))]
-    {:size   (c/cursor-size cursor)
-     :sample (if (and (int? sample-size) (pos? sample-size))
-               (c/sample-cursor cursor sample-size fields)
-               [])}))
+    fields :- [Key]
+    custom-attributes :- [{s/Keyword [s/Str]}]]]
+  (let [custom-attributes (mangle-keys custom-attributes)]
+    (try
+      (doall (pmap (fn [name ids] (create-custom-attribute client name ids)) custom-attributes))
+      (with-open [cursor (c/create-cursor! client (q/compile-query query))]
+        {:size   (c/cursor-size cursor)
+         :sample (if (and (int? sample-size) (pos? sample-size))
+                   (c/sample-cursor cursor sample-size fields)
+                   [])})
+      (finally
+        (doall (pmap #(delete-custom-attribute client %) (keys custom-attributes))))))
 
 (defn scan-indices [{:keys [db]} pattern f]
   (dorun (pmap #(scan-indices* % pattern f) db)))

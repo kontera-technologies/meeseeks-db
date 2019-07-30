@@ -220,45 +220,56 @@
           (instance? Byte x)))
 
 (defn split-ids-by-db [client ids]
-  (let [number-of-dbs (count (:data-db client))
+  (let [number-of-dbs (count @(:data-db client))
         id-buckets (vec (repeat number-of-dbs []))]
     (reduce (fn [id-arrays id]
               (let [db-number (get-db-number id number-of-dbs)]
                 (assoc id-arrays db-number (conj (nth id-arrays db-number) id)))) id-buckets ids)))
 
-
-(defn delete-custom-attribute [{:keys [db] :as client} name]
-  (let [db (deref (:db db))]
-    (pmap #(wcar % (car/del (str "custom:" name))) db)))
+(defn delete-custom-attribute [{:keys [db]} attribute-name]
+  (let [db (deref db)]
+    (doall (pmap #(wcar % (car/del (str "custom:" (name attribute-name)))) db))))
 
 (defn create-custom-attribute [{:keys [db] :as client} attribute-name ids]
-  (let [db (deref (:db db))
+  (let [db (deref db)
         db-buckets (split-ids-by-db client ids)]
-    (pmap (fn [db ids]
+    (doall (map (fn [db ids]
             (when (not-empty ids)
               (let [iids (wcar db (apply car/mget (map #(str "id:" %) ids)))
                     key-name (str "custom:" (name attribute-name))]
                 (wcar db
-                      (apply car/sadd  iids)
-                      (car/expire key-name 3600)
-                      )))) db db-buckets)))
+                      (apply car/sadd key-name iids)
+                      (car/expire key-name 3600))))) db db-buckets))))
+
+(defn fix-custom-keys* [query mangle-map]
+  (if (empty? (:nested query))
+    (assoc query :name (get mangle-map (:name query) (:name query)))
+    (update query :nodes (map #(fix-custom-keys* query %)))))
+
+(defn fix-custom-keys [query mangle-map]
+  (let [mangle-map (into {} (map #(hash-map (str "custom:" (name (first %))) (str "custom:" (name (second %)))) mangle-map))]
+    (fix-custom-keys* query mangle-map)))
 
 (s/defn query :- {:size s/Int :sample [{Key s/Any}]}
   [client &
    [query :- (s/maybe QueryExpression)
     sample-size :- (s/maybe s/Int)
     fields :- [Key]
-    custom-attributes :- [{s/Keyword [s/Str]}]]]
-  (let [custom-attributes (mangle-keys custom-attributes)]
+    custom-attributes :- {s/Keyword [s/Str]}]]
+  (let [mangled-custom-attributes (mangle-keys custom-attributes)
+        compiled-query (q/compile-query query)
+        compiled-query (if (not-empty mangled-custom-attributes)
+                         (fix-custom-keys compiled-query (zipmap (keys custom-attributes) (keys mangled-custom-attributes)))
+                         compiled-query)]
     (try
-      (doall (pmap (fn [name ids] (create-custom-attribute client name ids)) custom-attributes))
-      (with-open [cursor (c/create-cursor! client (q/compile-query query))]
+      (doseq [[name ids] mangled-custom-attributes] (create-custom-attribute client name ids))
+      (with-open [cursor (c/create-cursor! client compiled-query)]
         {:size   (c/cursor-size cursor)
          :sample (if (and (int? sample-size) (pos? sample-size))
                    (c/sample-cursor cursor sample-size fields)
                    [])})
       (finally
-        (doall (pmap #(delete-custom-attribute client %) (keys custom-attributes))))))
+        (doseq [custom-attribute-key (keys mangled-custom-attributes)] (delete-custom-attribute client custom-attribute-key))))))
 
 (defn scan-indices [{:keys [db]} pattern f]
   (dorun (pmap #(scan-indices* % pattern f) db)))

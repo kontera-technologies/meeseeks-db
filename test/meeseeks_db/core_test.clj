@@ -60,6 +60,7 @@
             :datatype    (gen/elements [:string :quantity :globe-coordinate :wikimedia-item :time])
             :label       (gen/not-empty gen/string-alphanumeric)
             :description gen/string-alphanumeric))
+
 (def profile-gen
   (gen/hash-map
     :id                gen/uuid
@@ -187,6 +188,27 @@
      (is (= 1 (:size result)))
      (is (= "Z2" (:id (first (:sample result))))))))
 
+(facts :custom-segments "simple custom segment"
+       (let [client   (initialize-client profile-indexer)
+             profiles (map-indexed #(assoc %2 :id (str %1)) (gen/sample profile-gen 1000))
+             ids-for-custom-segment (map :id (take 10 (shuffle profiles)))]
+         (index-entities! client profiles)
+         (sut/create-custom-attribute client :test ids-for-custom-segment)
+         (fact "simple querying should work"
+               (let [res     (sut/query client {:custom ["test"]} 10 [:id])]
+                 (map :id (:sample res)) => (m/just ids-for-custom-segment :in-any-order)))))
+
+
+(facts :custom-segments "custom segment with mangling"
+       (let [client   (initialize-client profile-indexer)
+             profiles (map-indexed #(assoc %2 :id (str %1)) (gen/sample profile-gen 1000))
+             ids-for-custom-segment (map :id (take 10 (shuffle profiles)))]
+         (index-entities! client profiles)
+         (fact "mangling should work"
+               (let [res (sut/query client {:custom ["test"]} 10 [:id] {:test ids-for-custom-segment})]
+                 (map :id (:sample res)) => (m/just ids-for-custom-segment :in-any-order)
+                 (u/run-command @(:db client) #(car/wcar % (car/keys "custom:*")) conj []) => (m/has every? empty?)))))
+
 (facts "about cursors"
   (let [client   (initialize-client profile-indexer)
         profiles (map-indexed #(assoc %2 :id (str %1)) (gen/sample profile-gen 1000))
@@ -259,13 +281,13 @@
                                                                                     (:not (:or "d:yahoo.com" "d:bing.com"
                                                                                               (:and "d:duckduckgo.com" "d:facebook.com"))
                                                                                          "d:google.com"))))
-(m/facts :simple "about simplify"
+(facts :simple "about simplify"
   (#'q/simplify ["and", ["and", {"iw" 31565330}, ["not", {"iw" 1255650}]], {"cc" "us"}]) =>
   '(:not (:and "iw:31565330" "cc:us") "iw:1255650")
   (#'q/simplify ["and", ["and", {"iw" 31565330}, ["not", {"iw" 1255650}]], {"cc" []}]) =>
   '(:not "iw:31565330" "iw:1255650"))
 
-(m/facts :simple "about compile-query"
+(facts :simple "about compile-query"
   (fact "simple things work"
         (q/compile-query "gender:male") => (attr "gender:male")
         (fact "simplifying works"

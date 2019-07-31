@@ -200,21 +200,12 @@
     (wcar data-conn
           (save-object! id nil))))
 
-
 (defn fetch
   "Fetch object by ID"
   [{:keys [data-db f-id->conn]} id & [fields]]
   (let [data-db (deref data-db)
         conn    (f-id->conn data-db id)]
     (wcar conn (fetch-object id fields))))
-
-(defn int?
-  "Return true if x is a fixed precision integer"
-  {:added "1.9"}
-  [x] (or (instance? Long x)
-          (instance? Integer x)
-          (instance? Short x)
-          (instance? Byte x)))
 
 (defn delete-custom-attribute [{:keys [db]} attribute-name]
   (let [db (deref db)]

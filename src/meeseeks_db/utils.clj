@@ -90,10 +90,8 @@
                                       (iid->id iid)))]
     ids))
 
-
 (defn- deref? [x]
   (instance? IDeref x))
-
 
 (clojure.core/defrecord Derefable [schema]
   Schema
@@ -114,3 +112,14 @@
     (if fields
       (apply car/hmget* k fields)
       (car/parse-map (car/hgetall k) :keywordize))))
+
+(defn random-string
+  ([] (random-string 10))
+  ([n]
+   (let [chars (map char (range 33 127))
+         result (take n (repeatedly #(rand-nth chars)))]
+     (reduce str result))))
+
+(defn mangle-keys [m]
+  (let [initial (random-string)]
+    (into {} (for [[k v] m] [(keyword (str initial (name k))) v]))))

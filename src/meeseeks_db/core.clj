@@ -216,13 +216,6 @@
           (instance? Short x)
           (instance? Byte x)))
 
-(defn split-ids-by-db [client ids]
-  (let [number-of-dbs (count @(:data-db client))
-        id-buckets (vec (repeat number-of-dbs []))]
-    (reduce (fn [id-arrays id]
-              (let [db-number (get-db-number id number-of-dbs)]
-                (assoc id-arrays db-number (conj (nth id-arrays db-number) id)))) id-buckets ids)))
-
 (defn delete-custom-attribute [{:keys [db]} attribute-name]
   (let [db (deref db)]
     (doall (pmap #(wcar % (car/del (str "custom:" (name attribute-name)))) db))))
@@ -231,7 +224,7 @@
   (let [db (deref db)
         id->conn (:f-id->conn client)
         db-buckets (group-by #(id->conn db %) ids)]
-    (doall (map (fn [[db ids]]
+    (doall (pmap (fn [[db ids]]
             (when (not-empty ids)
               (let [iids (wcar db (apply car/mget (map #(str "id:" %) ids)))
                     key-name (str "custom:" (name attribute-name))]

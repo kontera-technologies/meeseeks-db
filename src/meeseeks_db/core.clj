@@ -110,13 +110,10 @@
 (defn default-iid->id [iid]
   (car/get (str "iid:" iid)))
 
-(defn get-db-number [id number-of-dbs]
-  (let [hc (Murmur3/hashUnencodedChars (str id))]
-    (mod hc number-of-dbs)))
-
 (defn default-id->conn [db id]
   (if (> (count db) 1)
-    (nth db (get-db-number id (count db)))
+    (let [hc (Murmur3/hashUnencodedChars (str id))]
+      (nth db (mod hc (count db))))
     (first db)))
 
 ;; API
@@ -232,14 +229,15 @@
 
 (defn create-custom-attribute [{:keys [db] :as client} attribute-name ids]
   (let [db (deref db)
-        db-buckets (split-ids-by-db client ids)]
-    (doall (map (fn [db ids]
+        id->conn (:f-id->conn client)
+        db-buckets (group-by #(id->conn db %) ids)]
+    (doall (map (fn [[db ids]]
             (when (not-empty ids)
               (let [iids (wcar db (apply car/mget (map #(str "id:" %) ids)))
                     key-name (str "custom:" (name attribute-name))]
                 (wcar db
                       (apply car/sadd key-name iids)
-                      (car/expire key-name 3600))))) db db-buckets))))
+                      (car/expire key-name 3600))))) db-buckets))))
 
 (defn fix-custom-keys* [query mangle-map]
   (if (empty? (:nested query))

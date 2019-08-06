@@ -114,9 +114,13 @@
       (car/parse-map (car/hgetall k) :keywordize))))
 
 (defn random-string
-  ([] (random-string 10))
+  ([] (random-string 20))
   ([n]
-   (let [chars (map char (range 33 127))
+   (let [chars-between #(map char (range (int %1) (inc (int %2))))
+         chars (concat (chars-between \0 \9)
+                       (chars-between \a \z)
+                       (chars-between \A \Z)
+                       [\_])
          result (take n (repeatedly #(rand-nth chars)))]
      (reduce str result))))
 

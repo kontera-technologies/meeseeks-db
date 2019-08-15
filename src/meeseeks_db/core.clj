@@ -226,7 +226,7 @@
 (defn fix-custom-keys* [query mangle-map]
   (if (empty? (:nested query))
     (assoc query :name (get mangle-map (:name query) (:name query)))
-    (update query :nodes (map #(fix-custom-keys* query %)))))
+    (update query :nested (fn [x] (map #(fix-custom-keys* % mangle-map) x)))))
 
 (defn fix-custom-keys [query mangle-map]
   (let [mangle-map (into {} (map #(hash-map (str "custom:" (name (first %))) (str "custom:" (name (second %)))) mangle-map))]

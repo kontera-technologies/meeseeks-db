@@ -46,6 +46,10 @@
     Attr))
 
 
+(defn reverse-map2 [m]
+  (let [mapper (fn [[k va]] (r/foldcat (r/map #(hash-map % [k]) va)))]
+    (r/reduce (partial merge-with (fn [a1 a2] (conj a1 (first a2)))) (apply concat (r/foldcat (r/map mapper m))))))
+
 (def ^:dynamic *max-workers* 20)
 
 (def ^:dynamic *exception-handler*

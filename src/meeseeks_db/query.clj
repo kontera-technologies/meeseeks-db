@@ -17,13 +17,14 @@
 (ns meeseeks-db.query
   (:require
     [taoensso.carmine :as car :refer [wcar]]
-    [clojure.core.async :as async :refer [>!! <!!]]
+    [clojure.core.async :refer [chan pipe onto-chan <!! >!!] :as async]
     [clojure.stacktrace :as st]
     [schema.core :as s]
     [clojure.string :refer [starts-with? replace-first]]
     [meeseeks-db.utils :refer [stringify attr translate-iids run-command *max-workers* Queryable ->query-expression
                                ;;Schemas
-                               Key Value Op Attr Named QueryMap QueryExpression]])
+                               Key Value Op Attr Named QueryMap QueryExpression
+                               reverse-map2]])
   (:import [clojure.lang APersistentMap]))
 
 (s/defrecord Query [name :- Named

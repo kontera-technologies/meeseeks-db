@@ -20,7 +20,8 @@
             [clojure.core.async :as async :refer [<! <!! >! >!! go-loop]]
             [clojure.stacktrace :as st]
             [schema.spec.collection :as collection]
-            [schema.spec.core :as spec])
+            [schema.spec.core :as spec]
+            [clojure.core.reducers :as r])
   (:import [clojure.lang IDeref]
            [schema.core Schema]))
 

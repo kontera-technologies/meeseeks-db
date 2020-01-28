@@ -277,8 +277,6 @@
       (finally
         (doall (pmap #(cleanup-query client %) (conj queries scope)))))))
 
-
-
 (defn execute-on-shard [connection all-queries qids]
   "returns {qid => count}"
   (let [queries (map #(nth all-queries %) qids)
@@ -335,6 +333,7 @@
              ))
       (finally
         (doall (pmap #(cleanup-query client %) (conj all-queries scope)))))))
+
 
 (defn bulk-scoped-smarter-queries [client scope-spec queries-specs reference-spec]
   (let [dbs @(:db client)]

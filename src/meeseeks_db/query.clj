@@ -323,14 +323,15 @@
 
         [in out] (make-query-pipeline shard-num)
         messages (map #(hash-map :connection %1 :all-queries all-queries :qids %2) shards queries-per-shard)
+        _ (onto-chan in messages)
         ]
     (try
       (run-query! client scope)
-      (doall
-        (onto-chan in messages)
-        (map #(hash-map :size %)
-             (reduce-shards-results (loop [o []] (if-let [x (<!! out)] (recur (cons x o)) o)) shard-num)
-             ))
+      (vec (map #(hash-map :size %)
+                (reduce-shards-results (loop [o []]
+                                         (if-let [x (<!! out)]
+                                           (recur (cons x o)) o)) shard-num)
+                ))
       (finally
         (doall (pmap #(cleanup-query client %) (conj all-queries scope)))))))
 

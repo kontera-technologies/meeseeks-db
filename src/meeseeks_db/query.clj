@@ -17,13 +17,15 @@
 (ns meeseeks-db.query
   (:require
     [taoensso.carmine :as car :refer [wcar]]
-    [clojure.core.async :as async :refer [>!! <!!]]
+    [clojure.core.async :refer [chan pipe onto-chan <!! >!!] :as async]
     [clojure.stacktrace :as st]
     [schema.core :as s]
+    [upipeline.upipeline :refer [upipeline upipeline-blocking]]
     [clojure.string :refer [starts-with? replace-first]]
     [meeseeks-db.utils :refer [stringify attr translate-iids run-command *max-workers* Queryable ->query-expression
                                ;;Schemas
-                               Key Value Op Attr Named QueryMap QueryExpression]])
+                               Key Value Op Attr Named QueryMap QueryExpression
+                               reverse-map2]])
   (:import [clojure.lang APersistentMap]))
 
 (s/defrecord Query [name :- Named
@@ -274,6 +276,65 @@
              (multiple-queries->cursor client queries)))
       (finally
         (doall (pmap #(cleanup-query client %) (conj queries scope)))))))
+
+(defn execute-on-shard [connection all-queries qids]
+  "returns {qid => count}"
+  (let [queries (map #(nth all-queries %) qids)
+        reses (apply hash-map (wcar connection
+                                    (car/parse-suppress
+                                      (doseq [q queries] (query->command-list q)))
+                                    (doseq [q queries]
+                                      (car/return q)
+                                      (car/scard (:name q)))))
+        ]
+    (map #(vector %1 (get reses %2)) qids queries)
+    ))
+
+(defn reduce-shards-results [all-results shard-num]
+  (let [reducer (fn [h,[qid,c]] (if (get h qid)
+                                  (assoc h qid [(+ (first (get h qid)) c) (+ (second (get h qid)) 1)])
+                                  (assoc h qid [c 1])))
+        reduced-results (reduce reducer {} (apply concat all-results))
+        final-results (map #(int (* shard-num (/ (first %) (second %)))) (map second (sort-by first reduced-results)))]
+    final-results))
+
+(defn make-query-pipeline [shard-num]
+  (let [in (chan shard-num)
+        out (chan shard-num)]
+    (upipeline-blocking shard-num
+                        out
+                        (fn [{:keys [connection all-queries qids] :as params}]
+                          (execute-on-shard connection all-queries qids))
+                        in)
+    [in out]))
+
+
+(defn approximated-bulk-scoped-queries [client scope-spec queries-specs projected_hits_vector & [{:keys [wanted-hits p1 p2] :or {wanted-hits 500 p1 17 p2 11} :as options}]]
+  (let [shards @(:db client)
+        shard-num (count shards)
+        shards-num-per-query (map #(min shard-num (+ 1 (int (/ wanted-hits (+ (/ % shard-num) 0.0001))))) projected_hits_vector)
+        shards-per-query (map #(vector %1 (map (fn [x] (mod x shard-num)) (take %2 (range (* %1 p1) 2000000 p2)))) (range shard-num) shards-num-per-query)
+        queries-per-shard (map second (sort-by first (reverse-map2 shards-per-query))) ;query-ids
+
+        scope   (compile-query scope-spec)
+        all-queries (->> queries-specs
+                         (map compile-query)
+                         (map (partial apply-scope scope)))
+
+        [in out] (make-query-pipeline shard-num)
+        messages (map #(hash-map :connection %1 :all-queries all-queries :qids %2) shards queries-per-shard)
+        _ (onto-chan in messages)
+        ]
+    (try
+      (run-query! client scope)
+      (vec (map #(hash-map :size %)
+                (reduce-shards-results (loop [o []]
+                                         (if-let [x (<!! out)]
+                                           (recur (cons x o)) o)) shard-num)
+                ))
+      (finally
+        (doall (pmap #(cleanup-query client %) (conj all-queries scope)))))))
+
 
 (defn bulk-scoped-smarter-queries [client scope-spec queries-specs reference-spec]
   (let [dbs @(:db client)]

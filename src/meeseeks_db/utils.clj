@@ -20,7 +20,8 @@
             [clojure.core.async :as async :refer [<! <!! >! >!! go-loop]]
             [clojure.stacktrace :as st]
             [schema.spec.collection :as collection]
-            [schema.spec.core :as spec])
+            [schema.spec.core :as spec]
+            [clojure.core.reducers :as r])
   (:import [clojure.lang IDeref]
            [schema.core Schema]))
 
@@ -44,6 +45,10 @@
     (s/protocol Queryable)
     Attr))
 
+
+(defn reverse-map2 [m]
+  (let [mapper (fn [[k va]] (r/foldcat (r/map #(hash-map % [k]) va)))]
+    (r/reduce (partial merge-with (fn [a1 a2] (conj a1 (first a2)))) (apply concat (r/foldcat (r/map mapper m))))))
 
 (def ^:dynamic *max-workers* 20)
 

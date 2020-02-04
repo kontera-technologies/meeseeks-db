@@ -309,11 +309,11 @@
     [in out]))
 
 
-(defn approximated-bulk-scoped-queries [client scope-spec queries-specs projected_hits_vector & [{:keys [wanted-hits p1 p2] :or {wanted-hits 500 p1 17 p2 11} :as options}]]
+(defn approximated-bulk-scoped-queries [client scope-spec queries-specs projected-hits-vector & [{:keys [wanted-hits p1 p2] :or {wanted-hits 500 p1 17 p2 11} :as options}]]
   (let [shards @(:db client)
         shard-num (count shards)
-        shards-num-per-query (map #(min shard-num (+ 1 (int (/ wanted-hits (+ (/ % shard-num) 0.0001))))) projected_hits_vector)
-        shards-per-query (map #(vector %1 (map (fn [x] (mod x shard-num)) (take %2 (range (* %1 p1) 2000000 p2)))) (range shard-num) shards-num-per-query)
+        shards-num-per-query (map #(min shard-num (+ 1 (int (/ wanted-hits (+ (/ % shard-num) 0.0001))))) projected-hits-vector)
+        shards-per-query (map #(vector %1 (map (fn [x] (mod x shard-num)) (take %2 (range (* %1 p1) 2000000 p2)))) (range queries-specs) shards-num-per-query)
         queries-per-shard (map second (sort-by first (reverse-map2 shards-per-query))) ;query-ids
 
         scope   (compile-query scope-spec)

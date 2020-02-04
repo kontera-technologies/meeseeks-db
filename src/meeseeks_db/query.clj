@@ -313,7 +313,7 @@
   (let [shards @(:db client)
         shard-num (count shards)
         shards-num-per-query (map #(min shard-num (+ 1 (int (/ wanted-hits (+ (/ % shard-num) 0.0001))))) projected-hits-vector)
-        shards-per-query (map #(vector %1 (map (fn [x] (mod x shard-num)) (take %2 (range (* %1 p1) 2000000 p2)))) (range queries-specs) shards-num-per-query)
+        shards-per-query (map #(vector %1 (map (fn [x] (mod x shard-num)) (take %2 (range (* %1 p1) 2000000 p2)))) (range (count queries-specs)) shards-num-per-query)
         queries-per-shard (map second (sort-by first (reverse-map2 shards-per-query))) ;query-ids
 
         scope   (compile-query scope-spec)

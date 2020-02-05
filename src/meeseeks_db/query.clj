@@ -343,10 +343,10 @@
 
         [in out] (make-query-pipeline shard-num)
         messages (vec (map #(hash-map :connection %1 :all-queries all-queries :qids %2) shards queries-per-shard))
-        _ (onto-chan in messages)
         ]
     (try
       (run-query! client scope)
+      (onto-chan in messages)
       (vec (map #(hash-map :size %)
                 (reduce-shards-results (loop [o []]
                                          (if-let [x (<!! out)]
@@ -354,6 +354,8 @@
                 ))
       (finally
         (doall (pmap #(cleanup-query client %) (conj all-queries scope)))))))
+
+
 
 
 (defn bulk-scoped-smarter-queries [client scope-spec queries-specs reference-spec]

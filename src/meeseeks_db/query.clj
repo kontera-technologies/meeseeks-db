@@ -299,8 +299,8 @@
     final-results))
 
 (defn make-query-pipeline [shard-num]
-  (let [in (chan shard-num)
-        out (chan shard-num)]
+  (let [in (chan)
+        out (chan)]
     (upipeline-blocking shard-num
                         out
                         (fn [{:keys [connection all-queries qids] :as params}]
@@ -322,7 +322,7 @@
                          (map (partial apply-scope scope)))
 
         [in out] (make-query-pipeline shard-num)
-        messages (map #(hash-map :connection %1 :all-queries all-queries :qids %2) shards queries-per-shard)
+        messages (vec (map #(hash-map :connection %1 :all-queries all-queries :qids %2) shards queries-per-shard))
         _ (onto-chan in messages)
         ]
     (try

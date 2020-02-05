@@ -17,16 +17,36 @@
 (ns meeseeks-db.query
   (:require
     [taoensso.carmine :as car :refer [wcar]]
-    [clojure.core.async :refer [chan pipe onto-chan <!! >!!] :as async]
+    [clojure.core.async :refer [go-loop close! alts! chan pipe onto-chan <!! >!! thread] :as async]
     [clojure.stacktrace :as st]
     [schema.core :as s]
-    [upipeline.upipeline :refer [upipeline upipeline-blocking]]
     [clojure.string :refer [starts-with? replace-first]]
     [meeseeks-db.utils :refer [stringify attr translate-iids run-command *max-workers* Queryable ->query-expression
                                ;;Schemas
                                Key Value Op Attr Named QueryMap QueryExpression
                                reverse-map2]])
   (:import [clojure.lang APersistentMap]))
+
+(defn- upipeline* [n to proc-f]
+  (assert (pos? n))
+  (let [procs (doall (for [_ (range n)] (proc-f)))]
+    (go-loop [procs procs]
+             (if (empty? procs)
+               (close! to)
+               (let [[_ c] (alts! procs)]
+                 (recur (remove #(= c %) procs)))))))
+
+(defn upipeline-blocking
+  "Same as upipeline, but uses 'thread' instead of 'go'.
+  Should be used for blocking IO."
+  [n to f from]
+  (upipeline* n to
+              (fn []
+                (thread
+                  (loop []
+                    (when-some [job (<!! from)]
+                      (>!! to (f job))
+                      (recur)))))))
 
 (s/defrecord Query [name :- Named
                     transient? :- s/Bool

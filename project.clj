@@ -1,4 +1,4 @@
-(defproject com.amobee/meeseeks-db "0.10.17"
+(defproject com.amobee/meeseeks-db "0.10.18"
   :description "Redis-based fast sharded set-oriented DB"
   :url "https://github.com/kontera-technologies/meeseeks-db"
   :dependencies [[org.clojure/clojure     "1.9.0"]
@@ -6,7 +6,6 @@
                  [com.taoensso/carmine    "2.14.0"]
                  [com.taoensso/nippy      "2.12.2"]
                  [clj-time                "0.14.3"]
-                 [clj-utils             "0.9.1"]
                  [org.clojure/core.async  "0.4.474"]]
   :license {:name "GNU Lesser General Public License - v3"
             :url    "https://www.gnu.org/licenses/lgpl-3.0.en.html"}

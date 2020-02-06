@@ -17,16 +17,36 @@
 (ns meeseeks-db.query
   (:require
     [taoensso.carmine :as car :refer [wcar]]
-    [clojure.core.async :refer [chan pipe onto-chan <!! >!!] :as async]
+    [clojure.core.async :refer [go-loop close! alts! chan pipe onto-chan <!! >!! thread] :as async]
     [clojure.stacktrace :as st]
     [schema.core :as s]
-    [upipeline.upipeline :refer [upipeline upipeline-blocking]]
     [clojure.string :refer [starts-with? replace-first]]
     [meeseeks-db.utils :refer [stringify attr translate-iids run-command *max-workers* Queryable ->query-expression
                                ;;Schemas
                                Key Value Op Attr Named QueryMap QueryExpression
                                reverse-map2]])
   (:import [clojure.lang APersistentMap]))
+
+(defn- upipeline* [n to proc-f]
+  (assert (pos? n))
+  (let [procs (doall (for [_ (range n)] (proc-f)))]
+    (go-loop [procs procs]
+             (if (empty? procs)
+               (close! to)
+               (let [[_ c] (alts! procs)]
+                 (recur (remove #(= c %) procs)))))))
+
+(defn upipeline-blocking
+  "Same as upipeline, but uses 'thread' instead of 'go'.
+  Should be used for blocking IO."
+  [n to f from]
+  (upipeline* n to
+              (fn []
+                (thread
+                  (loop []
+                    (when-some [job (<!! from)]
+                      (>!! to (f job))
+                      (recur)))))))
 
 (s/defrecord Query [name :- Named
                     transient? :- s/Bool
@@ -299,8 +319,8 @@
     final-results))
 
 (defn make-query-pipeline [shard-num]
-  (let [in (chan shard-num)
-        out (chan shard-num)]
+  (let [in (chan)
+        out (chan)]
     (upipeline-blocking shard-num
                         out
                         (fn [{:keys [connection all-queries qids] :as params}]
@@ -309,11 +329,11 @@
     [in out]))
 
 
-(defn approximated-bulk-scoped-queries [client scope-spec queries-specs projected_hits_vector & [{:keys [wanted-hits p1 p2] :or {wanted-hits 500 p1 17 p2 11} :as options}]]
+(defn approximated-bulk-scoped-queries [client scope-spec queries-specs projected-hits-vector & [{:keys [wanted-hits p1 p2] :or {wanted-hits 500 p1 17 p2 11} :as options}]]
   (let [shards @(:db client)
         shard-num (count shards)
-        shards-num-per-query (map #(min shard-num (+ 1 (int (/ wanted-hits (+ (/ % shard-num) 0.0001))))) projected_hits_vector)
-        shards-per-query (map #(vector %1 (map (fn [x] (mod x shard-num)) (take %2 (range (* %1 p1) 2000000 p2)))) (range shard-num) shards-num-per-query)
+        shards-num-per-query (map #(min shard-num (+ 1 (int (/ wanted-hits (+ (/ % shard-num) 0.0001))))) projected-hits-vector)
+        shards-per-query (map #(vector %1 (map (fn [x] (mod x shard-num)) (take %2 (range (* %1 p1) 2000000 p2)))) (range (count queries-specs)) shards-num-per-query)
         queries-per-shard (map second (sort-by first (reverse-map2 shards-per-query))) ;query-ids
 
         scope   (compile-query scope-spec)
@@ -322,11 +342,11 @@
                          (map (partial apply-scope scope)))
 
         [in out] (make-query-pipeline shard-num)
-        messages (map #(hash-map :connection %1 :all-queries all-queries :qids %2) shards queries-per-shard)
-        _ (onto-chan in messages)
+        messages (vec (map #(hash-map :connection %1 :all-queries all-queries :qids %2) shards queries-per-shard))
         ]
     (try
       (run-query! client scope)
+      (onto-chan in messages)
       (vec (map #(hash-map :size %)
                 (reduce-shards-results (loop [o []]
                                          (if-let [x (<!! out)]
@@ -334,6 +354,8 @@
                 ))
       (finally
         (doall (pmap #(cleanup-query client %) (conj all-queries scope)))))))
+
+
 
 
 (defn bulk-scoped-smarter-queries [client scope-spec queries-specs reference-spec]

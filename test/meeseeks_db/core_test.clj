@@ -122,7 +122,7 @@
                              profiles)]
         (is (= (count (distinct (map :id filtered)))
                (:size (sut/query client {:gender [:male]
-                                          :age    [:2-11 :12-17]}))))))
+                                          :age    [:2-11 :12-17]} 1 [:gender :id]))))))
     (testing "simple query + fetch"
       (let [filtered (filter #(and (= (:gender %) :male)
                                    (= (:age %) :25-34)

@@ -136,15 +136,17 @@
    (s/optional-key :data-db) (deref-of [Connection])
    (s/optional-key :f-id->iid) (s/pred fn?)
    (s/optional-key :f-iid->id) (s/pred fn?)
-   (s/optional-key :f-id->conn) (s/pred fn?)})
+   (s/optional-key :f-id->conn) (s/pred fn?)
+   (s/optional-key :f-multi-id->iid) (s/pred fn?)
+   (s/optional-key :f-multi-id->conn) (s/pred fn?)})
 
-(s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db f-id->iid f-iid->id
-                                                     multi-f-id->iid multi-f-id->conn f-id->conn]
+(s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db f-id->iid f-iid->id f-id->conn
+                                                     f-multi-id->iid f-multi-id->conn ]
                                               :or   {f-id->iid  default-id->iid
-                                                     multi-f-id->iid default-multi-id->iid
                                                      f-iid->id  default-iid->id
                                                      f-id->conn default-id->conn
-                                                     multi-f-id->conn default-multi-id->conn}} :- ClientConfig]
+                                                     f-multi-id->iid default-multi-id->iid
+                                                     f-multi-id->conn default-multi-id->conn}} :- ClientConfig]
   "Initialize meeseeks client
 
   Options:
@@ -153,8 +155,6 @@
   :f-id->iid  - Function from connection and ID to IID for that connection
   :f-iid->id  - Function from IID to the original ID. Run in the context of `wcar`
   :f-id->conn - Function from list of DBs (either dbs or data-db) and ID to the appropriate connection
-
-
   "
   (assert (ifn? f-index)  "f-index function is mandatory")
   (let [mdb {:db        dbs
@@ -162,7 +162,9 @@
              :f-id->iid f-id->iid
              :f-id->conn f-id->conn
              :f-iid->id f-iid->id
-             :f-index   f-index}]
+             :f-index   f-index
+             :f-multi-id->iid f-multi-id->iid
+             :f-multi-id->conn f-multi-id->conn}]
     mdb))
 
 (defn index!
@@ -213,16 +215,25 @@
     (wcar data-conn
           (save-object! id nil))))
 
+(defn group-by-idx [f coll]
+  "group-by, except that f accept the idx of the element in coll"
+  (persistent!
+    (reduce (fn [ret idx]
+              (let [k (f idx)
+                    x (nth coll idx)]
+                (assoc! ret k (conj (get ret k []) x))))
+            (transient {}) (range (count coll)))))
+
 (defn multi-unindex!
   "Remove each in id object and its indices."
-  [{:keys [db data-db multi-f-id->conn multi-f-id->iid f-index]} id]
+  [{:keys [db data-db f-multi-id->conn f-multi-id->iid f-index]} id]
   (let [db        @db
         data-db   @data-db
-        conn-dconn-id (let [conn (multi-f-id->conn db id)
-                            data-conn (multi-f-id->conn data-db id)]
+        conn-dconn-id (let [conn (f-multi-id->conn db id)
+                            data-conn (f-multi-id->conn data-db id)]
                         (group-by-idx (fn [idx] [(nth conn idx) (nth data-conn idx)]) id))
         todo (map (fn [[[conn data-conn] id]]
-                    (let [iid (multi-f-id->iid conn id "delete")
+                    (let [iid (f-multi-id->iid conn id "delete")
                           obj (wcar data-conn (dorun (map #(fetch-object %) id)))
                           indices (map #(indexify f-index %) obj)]
                       [conn data-conn id iid indices]))

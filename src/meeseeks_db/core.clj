@@ -109,7 +109,7 @@
 
 (defn default-multi-id->iid
   ([conn id delete?]
-   (wcar conn (dorun (map #(car/get (str "id:" %)) id)))))
+   (wcar conn (doseq [id_i id] (car/get (str "id:" id_i))))))
 
 (defn default-iid->id [iid]
   (car/get (str "iid:" iid)))
@@ -119,12 +119,6 @@
     (let [hc (Murmur3/hashUnencodedChars (str id))]
       (nth db (mod hc (count db))))
     (first db)))
-
-(defn default-multi-id->conn [db id]
-  (if (> (count db) 1)
-    (let [hc (map #(Murmur3/hashUnencodedChars (str %)) id)]
-      (map #(nth db (mod % (count db))) hc))
-    (repeat (count id) (first db))))
 
 ;; API
 (s/defschema Connection
@@ -145,8 +139,7 @@
                                               :or   {f-id->iid  default-id->iid
                                                      f-iid->id  default-iid->id
                                                      f-id->conn default-id->conn
-                                                     f-multi-id->iid default-multi-id->iid
-                                                     f-multi-id->conn default-multi-id->conn}} :- ClientConfig]
+                                                     f-multi-id->iid default-multi-id->iid}} :- ClientConfig]
   "Initialize meeseeks client
 
   Options:
@@ -163,8 +156,7 @@
              :f-id->conn f-id->conn
              :f-iid->id f-iid->id
              :f-index   f-index
-             :f-multi-id->iid f-multi-id->iid
-             :f-multi-id->conn f-multi-id->conn}]
+             :f-multi-id->iid f-multi-id->iid]
     mdb))
 
 (defn index!
@@ -229,12 +221,12 @@
   [{:keys [db data-db f-multi-id->conn f-multi-id->iid f-index]} id]
   (let [db        @db
         data-db   @data-db
-        conn-dconn-id (let [conn (f-multi-id->conn db id)
-                            data-conn (f-multi-id->conn data-db id)]
+        conn-dconn-id (let [conn (doall (map #(f-id->conn db %) id))
+                            data-conn (doall (map #(f-id->conn data-db %) id))]
                         (group-by-idx (fn [idx] [(nth conn idx) (nth data-conn idx)]) id))
         todo (map (fn [[[conn data-conn] id]]
                     (let [iid (f-multi-id->iid conn id "delete")
-                          obj (wcar data-conn (dorun (map #(fetch-object %) id)))
+                          obj (wcar data-conn (doall (map #(fetch-object %) id)))
                           indices (map #(indexify f-index %) obj)]
                       [conn data-conn id iid indices]))
                   (seq conn-dconn-id))]

@@ -156,7 +156,7 @@
              :f-id->conn f-id->conn
              :f-iid->id f-iid->id
              :f-index   f-index
-             :f-multi-id->iid f-multi-id->iid]
+             :f-multi-id->iid f-multi-id->iid}]
     mdb))
 
 (defn index!
@@ -218,11 +218,11 @@
 
 (defn multi-unindex!
   "Remove each in id object and its indices."
-  [{:keys [db data-db f-multi-id->conn f-multi-id->iid f-index]} id]
+  [{:keys [db data-db f-id->conn f-multi-id->iid f-index]} id]
   (let [db        @db
         data-db   @data-db
-        conn-dconn-id (let [conn (doall (map #(f-id->conn db %) id))
-                            data-conn (doall (map #(f-id->conn data-db %) id))]
+        conn-dconn-id (let [conn (doseq [id_i id] (f-id->conn db id_i))
+                            data-conn (doseq [id_i id] (f-id->conn data-db id_i))]
                         (group-by-idx (fn [idx] [(nth conn idx) (nth data-conn idx)]) id))
         todo (map (fn [[[conn data-conn] id]]
                     (let [iid (f-multi-id->iid conn id "delete")

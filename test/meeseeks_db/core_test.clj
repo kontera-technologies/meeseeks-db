@@ -539,30 +539,30 @@
         (is (= (count filtered-mb) (:size (nth results 2))))
         (is (= (count filtered-fb) (:size (nth results 3))))))))
 
-(deftest smart-bulk-bug
-  (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 300)]
-    (index-entities! client profiles)
-    (let [expected-count    (count
-                              (intersection
-                                 (intersection
-                                  (set (filter #(prop-visited? "bing.com" %) profiles))
-                                  (set (filter #(prop-is? :cc "us" %) profiles)))
-                                 (set (filter #(prop-visited? "bing.com" %) profiles))))
-          common-filters    '(and "d:bing.com" "cc:us")
-          query             '(and "d:bing.com")
-          reference-filters '(and "cc:us")]
-      (doseq [i (range 10)
-              :let [rs  (q/bulk-scoped-queries client common-filters
-                                               (take i (repeat query)))
-                    srs (q/bulk-scoped-smarter-queries client common-filters
-                                                       (take i (repeat query))
-                                                       reference-filters)]]
-        (is (every? (fn [[r sr]]
-                      (and (= expected-count (:size r))
-                           (or (= -1 (:size sr))
-                               (= (:size r) (:size sr)))))
-                    (map vector rs srs)))))))
+;(deftest smart-bulk-bug
+;  (let [client   (initialize-client profile-indexer)
+;        profiles (gen/sample profile-gen 300)]
+;    (index-entities! client profiles)
+;    (let [expected-count    (count
+;                              (intersection
+;                                 (intersection
+;                                  (set (filter #(prop-visited? "bing.com" %) profiles))
+;                                  (set (filter #(prop-is? :cc "us" %) profiles)))
+;                                 (set (filter #(prop-visited? "bing.com" %) profiles))))
+;          common-filters    '(and "d:bing.com" "cc:us")
+;          query             '(and "d:bing.com")
+;          reference-filters '(and "cc:us")]
+;      (doseq [i (range 10)
+;              :let [rs  (q/bulk-scoped-queries client common-filters
+;                                               (take i (repeat query)))
+;                    srs (q/bulk-scoped-smarter-queries client common-filters
+;                                                       (take i (repeat query))
+;                                                       reference-filters)]]
+;        (is (every? (fn [[r sr]]
+;                      (and (= expected-count (:size r))
+;                           (or (= -1 (:size sr))
+;                               (= (:size r) (:size sr)))))
+;                    (map vector rs srs)))))))
 
 ;
 ;(deftest multi-unindex!

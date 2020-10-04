@@ -563,3 +563,20 @@
                            (or (= -1 (:size sr))
                                (= (:size r) (:size sr)))))
                     (map vector rs srs)))))))
+
+;
+;(deftest multi-unindex!
+;  (let [sample-size 100
+;        client   (initialize-client profile-indexer)
+;        profiles (gen/sample (gen/hash-map
+;                                           :id                gen/uuid
+;                                           :something-else    (gen/not-empty gen/string-alphanumeric))
+;                                       sample-size)
+;        [to-keep to-remove] (split-at (int (/ sample-size 2)) profiles)]
+;
+;    (index-entities! client profiles)
+;    (testing "all profiles"
+;      (is (= (count (distinct (map :id profiles)))
+;             (:size (sut/query client "total" 0)))))
+;    (sut/multi-unindex! client  (map :id to-remove))))
+;

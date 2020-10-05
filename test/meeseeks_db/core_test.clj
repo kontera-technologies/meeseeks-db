@@ -563,20 +563,41 @@
 ;                           (or (= -1 (:size sr))
 ;                               (= (:size r) (:size sr)))))
 ;                    (map vector rs srs)))))))
+;
 
-;
-;(deftest multi-unindex!
-;  (let [sample-size 100
-;        client   (initialize-client profile-indexer)
-;        profiles (gen/sample (gen/hash-map
-;                                           :id                gen/uuid
-;                                           :something-else    (gen/not-empty gen/string-alphanumeric))
-;                                       sample-size)
-;        [to-keep to-remove] (split-at (int (/ sample-size 2)) profiles)]
-;
-;    (index-entities! client profiles)
-;    (testing "all profiles"
-;      (is (= (count (distinct (map :id profiles)))
-;             (:size (sut/query client "total" 0)))))
-;    (sut/multi-unindex! client  (map :id to-remove))))
-;
+(deftest multi!
+  (let [sample-size 100
+        client   (initialize-client profile-indexer)
+        profiles (gen/sample (gen/hash-map
+                                           :id                gen/uuid
+                                           :something-else    (gen/not-empty gen/string-alphanumeric))
+                                       sample-size)
+        [to-keep to-remove] (split-at (int (/ sample-size 2)) profiles)]
+
+    (testing "multi-index!"
+      (sut/multi-index! client profiles)
+      (let [result (sut/query client "total" sample-size)
+            result-ids (set (map :id (:sample result)))
+            profiles-ids (set (map :id profiles))]
+
+        (is (= (count profiles-ids)
+               (:size result)))
+
+        (is (= profiles-ids result-ids))))
+
+    (testing "multi-unindex!"
+      (sut/multi-unindex! client (map :id to-remove))
+      (let [result (sut/query client "total" sample-size)
+            result-ids (set (map :id (:sample result)))
+            to-keep-ids (set (map :id to-keep))]
+
+        (is (= (count to-keep-ids)
+               (:size result)))
+
+        (is (= to-keep-ids result-ids))))))
+
+
+
+
+
+

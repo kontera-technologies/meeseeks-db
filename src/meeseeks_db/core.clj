@@ -120,7 +120,7 @@
 
            max-new-iid (:result (with-lock conn "kona-iid" 20000 50000 (wcar conn (car/incrby "next-iid" n-new-iids))))
 
-           idx-id-new-iid (when max-new-iid
+           idx-id-new-iid (when (and (> n-new-iids 0) max-new-iid)
                             (let [idx (map :idx (get found?idx-id-iid false))
                                   id (map :id (get found?idx-id-iid false))
                                   new-iid (range (+ 1 (- max-new-iid n-new-iids)) (+ 1 max-new-iid))
@@ -139,9 +139,9 @@
                key (map #(str "iid:" %) iid)
                res-id (wcar conn (apply car/mget key))
 
-               toset-key-id (filter second (map list key res-id))]
+               toset-key-id (flatten (map (fn [[res-id key id]] [key id]) (filter #(nil? (first %)) (map list res-id key id))))]
 
-           (when toset-key-id (wcar conn (apply car/mset toset-key-id)))))
+           (when (not-empty toset-key-id) (wcar conn (apply car/mset toset-key-id)))))
 
 
       (map :iid (sort-by :idx (concat idx-id-iid idx-id-new-iid)))))
@@ -221,6 +221,10 @@
                 (update-attr! iid k old new)))
             (car/sadd "total" iid)))
 
+    ;(println "index!")
+    ;(println data-conn)
+    ;(println id)
+    ;(println obj)
     (wcar data-conn
           (save-object! id obj))
     [id iid data-conn]))
@@ -302,6 +306,10 @@
 
             (wcar data-conn
               (doseq [obj_i obj]
+                ;(println "multi")
+                ;(println data-conn)
+                ;(println (:id obj_i))
+                ;(println obj_i)
                 (save-object! (:id obj_i) obj_i)))))))
 
 (defn multi-unindex!

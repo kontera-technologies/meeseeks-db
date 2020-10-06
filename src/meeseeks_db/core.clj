@@ -221,10 +221,6 @@
                 (update-attr! iid k old new)))
             (car/sadd "total" iid)))
 
-    ;(println "index!")
-    ;(println data-conn)
-    ;(println id)
-    ;(println obj)
     (wcar data-conn
           (save-object! id obj))
     [id iid data-conn]))
@@ -270,7 +266,7 @@
         todo (map (fn [[[conn data-conn] obj]]
                     (let [id (map :id obj)
                           iid (f-multi-id->iid conn id)
-                          old (wcar data-conn (doall (map #(fetch-object %) id)))
+                          old (map #(wcar data-conn (fetch-object %)) id)
 
                           index-pairs (doall (map
                                                (fn [[old_i obj_i]]
@@ -291,8 +287,9 @@
             found (wcar conn (apply car/mget iid))
             iid-id-to-set (doall (flatten (map first (filter (fn [[iid-id found]] (nil? found))
                                              (map list iid-id found)))))
-            iid-index-pairs (filter (fn [[iid_i index-pairs_i]] (and iid_i (not-empty index-pairs_i)))
-                                   (map list iid index-pairs))
+            iid-index-pairs (filter (fn [[iid_i index-pairs_i]]
+                                        (and iid_i (not-empty index-pairs_i)))
+                                    (map list iid index-pairs))
             iid (doall (map first iid-index-pairs))]
 
             (when (seq iid-id-to-set) (wcar conn (apply car/mset iid-id-to-set)))
@@ -306,11 +303,9 @@
 
             (wcar data-conn
               (doseq [obj_i obj]
-                ;(println "multi")
-                ;(println data-conn)
-                ;(println (:id obj_i))
-                ;(println obj_i)
-                (save-object! (:id obj_i) obj_i)))))))
+                (save-object! (:id obj_i) obj_i)))
+
+            ))))
 
 (defn multi-unindex!
   "Remove each in id object and its indices."
@@ -321,13 +316,14 @@
                             data-conn (doall (map #(f-id->conn data-db %) id))]
                         (group-by-idx (fn [idx] [(nth conn idx) (nth data-conn idx)]) id))
 
-
-        todo (map (fn [[[conn data-conn] id]]
+        todo (doall (map (fn [[[conn data-conn] id]]
                     (let [iid (f-multi-id->iid conn id "delete")
-                          obj (wcar data-conn (doall (map #(fetch-object %) id)))
+                          iid (flatten (conj [] iid))
+                          obj (map #(wcar data-conn (fetch-object %)) id)
                           indices (map #(indexify f-index %) obj)]
+
                       [conn data-conn id iid indices]))
-                  (seq conn-dconn-id))]
+                  (seq conn-dconn-id)))]
 
     (doseq [[conn data-conn id iid indices] todo]
       (wcar conn

@@ -564,30 +564,25 @@
 ;                               (= (:size r) (:size sr)))))
 ;                    (map vector rs srs)))))))
 ;
+;
 
-(deftest multi!
-  (let [sample-size 100
-        client   (initialize-client profile-indexer)
-        profiles (gen/sample (gen/hash-map
-                                           :id                gen/uuid
-                                           :something-else    (gen/not-empty gen/string-alphanumeric))
-                                       sample-size)
-        [to-keep to-remove] (split-at (int (/ sample-size 2)) profiles)]
 
+(defn test-multi [client to-index to-unindex]
+  (let [to-keep (difference (set to-index) (set to-unindex))]
     (testing "multi-index!"
-      (sut/multi-index! client profiles)
-      (let [result (sut/query client "total" sample-size)
+      (sut/multi-index! client to-index)
+      (let [result (sut/query client "total" (count to-index))
             result-ids (set (map :id (:sample result)))
-            profiles-ids (set (map :id profiles))]
+            to-index-ids (set (map :id to-index))]
 
-        (is (= (count profiles-ids)
+        (is (= (count to-index-ids)
                (:size result)))
 
-        (is (= profiles-ids result-ids))))
+        (is (= to-index-ids result-ids))))
 
     (testing "multi-unindex!"
-      (sut/multi-unindex! client (map :id to-remove))
-      (let [result (sut/query client "total" sample-size)
+      (sut/multi-unindex! client (map :id to-unindex))
+      (let [result (sut/query client "total" (count to-index))
             result-ids (set (map :id (:sample result)))
             to-keep-ids (set (map :id to-keep))]
 
@@ -597,7 +592,29 @@
         (is (= to-keep-ids result-ids))))))
 
 
+(deftest multi!
+  (let [client (initialize-client profile-indexer)
+        single-profile (gen/sample (gen/hash-map
+                                           :id                gen/uuid
+                                           :something-else    (gen/not-empty gen/string-alphanumeric))
+                                       1)
 
+        sample-size 20
+        multi-profiles (gen/sample (gen/hash-map
+                                     :id                gen/uuid
+                                     :something-else    (gen/not-empty gen/string-alphanumeric))
+                                   sample-size)
+        to-remove (take (int (/ sample-size 2)) multi-profiles)]
 
+    ;index and unindex 1 profile
+    (test-multi client single-profile single-profile)
+
+    ;index and unindex multi-profiles
+    (test-multi client multi-profiles to-remove)
+
+    ;index multiples times than unindex
+    (test-multi client multi-profiles nil)
+    (test-multi client multi-profiles to-remove)
+    ))
 
 

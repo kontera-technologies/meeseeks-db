@@ -17,6 +17,6 @@
                    :dependencies [[org.clojure/tools.nrepl "0.2.12"]
                                   [org.clojure/tools.namespace "0.2.11"]
                                   [org.clojure/test.check  "0.9.0"]
-                                  [midje                   "1.9.1"]]
+                                  [midje                   "1.9.9"]]
                    :plugins [[lein-midje "3.2.1"]]}
              :repl {:plugins [[com.billpiel/sayid "0.0.10"]]}})

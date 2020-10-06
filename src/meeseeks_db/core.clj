@@ -169,11 +169,10 @@
    (s/optional-key :f-id->iid) (s/pred fn?)
    (s/optional-key :f-iid->id) (s/pred fn?)
    (s/optional-key :f-id->conn) (s/pred fn?)
-   (s/optional-key :f-multi-id->iid) (s/pred fn?)
-   (s/optional-key :f-multi-id->conn) (s/pred fn?)})
+   (s/optional-key :f-multi-id->iid) (s/pred fn?)})
 
 (s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db f-id->iid f-iid->id f-id->conn
-                                                     f-multi-id->iid f-multi-id->conn ]
+                                                     f-multi-id->iid ]
                                               :or   {f-id->iid  default-id->iid
                                                      f-iid->id  default-iid->id
                                                      f-id->conn default-id->conn

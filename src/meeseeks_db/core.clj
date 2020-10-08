@@ -266,7 +266,8 @@
         todo (map (fn [[[conn data-conn] obj]]
                     (let [id (map :id obj)
                           iid (f-multi-id->iid conn id)
-                          old (map #(wcar data-conn (fetch-object %)) id)
+                          old (wcar data-conn (doall (map #(fetch-object %) id)))
+                          old (flatten (conj [] old))
 
                           index-pairs (doall (map
                                                (fn [[old_i obj_i]]
@@ -319,7 +320,8 @@
         todo (doall (map (fn [[[conn data-conn] id]]
                     (let [iid (f-multi-id->iid conn id "delete")
                           iid (flatten (conj [] iid))
-                          obj (map #(wcar data-conn (fetch-object %)) id)
+                          obj (wcar data-conn (map #(fetch-object %) id))
+                          obj (flatten (conj [] obj))
                           indices (map #(indexify f-index %) obj)]
 
                       [conn data-conn id iid indices]))

@@ -567,7 +567,7 @@
 ;
 
 
-(defn test-multi [client to-index to-unindex]
+(defn index-unindex-multi-test [client to-index to-unindex]
   (let [to-keep (difference (set to-index) (set to-unindex))]
     (testing "multi-index!"
       (sut/multi-index! client to-index)
@@ -607,14 +607,14 @@
         to-remove (take (int (/ sample-size 2)) multi-profiles)]
 
     ;index and unindex 1 profile
-    (test-multi client single-profile single-profile)
+    (index-unindex-multi-test client single-profile single-profile)
 
     ;index and unindex multi-profiles
-    (test-multi client multi-profiles to-remove)
+    (index-unindex-multi-test client multi-profiles to-remove)
 
     ;index multiples times than unindex
-    (test-multi client multi-profiles nil)
-    (test-multi client multi-profiles to-remove)
+    (index-unindex-multi-test client multi-profiles nil)
+    (index-unindex-multi-test client multi-profiles to-remove)
     ))
 
 

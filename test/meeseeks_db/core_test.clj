@@ -571,14 +571,16 @@
   (let [to-keep (difference (set to-index) (set to-unindex))]
     (testing "multi-index!"
       (sut/multi-index! client to-index)
-      (let [result (sut/query client "total" (count to-index))
+      (let [result (sut/query client "total" (count to-index) [:id :something-else])
             result-ids (set (map :id (:sample result)))
             to-index-ids (set (map :id to-index))]
 
         (is (= (count to-index-ids)
                (:size result)))
 
-        (is (= to-index-ids result-ids))))
+        (is (= to-index-ids result-ids))
+
+        (is (= (set (:sample result)) (set to-index)))))
 
     (testing "multi-unindex!"
       (sut/multi-unindex! client (map :id to-unindex))

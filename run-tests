@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+docker start meeseeks-db-redis0
+docker start meeseeks-db-redis1
+docker start meeseeks-db-redis2
+
 docker pull redis
 docker run -v ${PWD}/etc/dev-test/redis.conf:/usr/local/etc/redis.conf --name meeseeks-db-redis0 -p 26269:6379 -d redis redis-server /usr/local/etc/redis.conf
 docker run -v ${PWD}/etc/dev-test/redis.conf:/usr/local/etc/redis.conf --name meeseeks-db-redis1 -p 26279:6379 -d redis redis-server /usr/local/etc/redis.conf

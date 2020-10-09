@@ -122,29 +122,29 @@
                            (when (not-empty key-id_list) (wcar conn (apply car/mset key-id_list))))))
 
            iid_list (wcar conn (apply car/mget (doall (map #(str "id:" %) id_list))))
-           i-id-iid_list (map-indexed (fn [i [id_i iid_i]] {:idx i :id id_i :iid iid_i}) (map list id_list iid_list))
+           i-id-iid_list (map-indexed (fn [i [id_i iid_i]] {:i i :id id_i :iid iid_i}) (map list id_list iid_list))
            iid-found?i-id-iid_list (group-by (fn [idx-id-iid] (some? (:iid idx-id-iid))) i-id-iid_list)
-           i-id-iid_list (get iid-found?i-id-iid_list true)
-
+           i-id-exist-iid_list (get iid-found?i-id-iid_list true)
            i-id-nil_list (get iid-found?i-id-iid_list false)
-           n-new-iids (count i-id-nil_list)
-           last-new-iid (:result (with-lock conn "kona-iid" 20000 50000 (wcar conn (car/incrby "next-iid" n-new-iids))))
+           i-id-new-iid_list (let [n-new-iids (count i-id-nil_list)
+                                   last-new-iid (:result (with-lock conn "kona-iid" 20000 50000
+                                                            (wcar conn (car/incrby "next-iid" n-new-iids))))]
+                                 (if
+                                   (and (> n-new-iids 0) last-new-iid)
+                                   (let [idx_list (map :i i-id-nil_list)
+                                         id_list (map :id i-id-nil_list)
+                                         new-iid_list (range (+ 1 (- last-new-iid n-new-iids)) (+ 1 last-new-iid))
 
-           i-id-new-iid_list (when (and (> n-new-iids 0) last-new-iid)
-                                  (let [idx_list (map :idx i-id-nil_list)
-                                        id_list (map :id i-id-nil_list)
-                                        new-iid_list (range (+ 1 (- last-new-iid n-new-iids)) (+ 1 last-new-iid))
+                                          id:new-iid_list (flatten (map list (map #(str "id:" %) id_list) new-iid_list))
+                                          new-iid:id_list (flatten (map list (map #(str "iid:" %) new-iid_list) id_list))]
+                                          (wcar conn (apply car/mset (concat id:new-iid_list new-iid:id_list)))
 
-                                        id:new-iid_list (flatten (map list (map #(str "id:" %) id_list) new-iid_list))
-                                        new-iid:id_list (flatten (map list (map #(str "iid:" %) new-iid_list) id_list))]
+                                          (map (fn [[idx id new-iid]] {:i idx :id id :iid new-iid})
+                                               (map list idx_list id_list new-iid_list)))
+                                   i-id-nil_list))]
 
-                                        (wcar conn (apply car/mset (concat id:new-iid_list new-iid:id_list)))
-
-                                        (map (fn [[idx id new-iid]] {:idx idx :id id :iid new-iid})
-                                             (map list idx_list id_list new-iid_list))))]
-
-   (save-id i-id-iid_list)
-   (map :iid (sort-by :idx (concat i-id-iid_list i-id-new-iid_list)))))
+   (save-id i-id-exist-iid_list)
+   (map :iid (sort-by :i (concat i-id-exist-iid_list i-id-new-iid_list)))))
 
   ([conn id delete?]
    (wcar conn (doseq [id_i id] (car/get (str "id:" id_i))))))

@@ -568,30 +568,34 @@
 
 
 (defn index-unindex-multi-test [client to-index to-unindex]
-  (let [to-keep (difference (set to-index) (set to-unindex))]
-    (testing "multi-index!"
-      (sut/multi-index! client to-index)
-      (let [result (sut/query client "total" (count to-index) [:id :something-else])
-            result-ids (set (map :id (:sample result)))
-            to-index-ids (set (map :id to-index))]
 
-        (is (= (count to-index-ids)
-               (:size result)))
+  (testing "multi-index!"
+      (let [indexed-before (sut/query client "total" 100 [:id :something-else])
+            _ (sut/multi-index! client to-index)
+            indexed-after (sut/query client "total" 100 [:id :something-else])]
 
-        (is (= to-index-ids result-ids))
+        (is (= (count (union (set (:sample indexed-before)) (set to-index)))
+               (:size indexed-after)))
 
-        (is (= (set (:sample result)) (set to-index)))))
+        (is (= (union (set (map :id (:sample indexed-before))) (set (map :id to-index)))
+               (set (map :id (:sample indexed-after)))))
 
-    (testing "multi-unindex!"
-      (sut/multi-unindex! client (map :id to-unindex))
-      (let [result (sut/query client "total" (count to-index))
-            result-ids (set (map :id (:sample result)))
-            to-keep-ids (set (map :id to-keep))]
+        (is (= (union (set (:sample indexed-before)) (set to-index)))
+               (set (:sample indexed-after)))))
 
-        (is (= (count to-keep-ids)
-               (:size result)))
+  (testing "multi-unindex!"
+    (let [indexed-before (sut/query client "total" 100 [:id :something-else])
+          _ (sut/multi-unindex! client (map :id to-unindex))
+          indexed-after (sut/query client "total" 100 [:id :something-else])]
 
-        (is (= to-keep-ids result-ids))))))
+      (is (= (count (difference (set (:sample indexed-before)) (set to-unindex)))
+             (:size indexed-after)))
+
+      (is (= (difference (set (map :id (:sample indexed-before))) (set (map :id to-unindex)))
+             (set (map :id (:sample indexed-after)))))
+
+      (is (= (difference (set (:sample indexed-before)) (set to-unindex)))
+          (set (:sample indexed-after))))))
 
 
 (deftest multi!
@@ -601,22 +605,17 @@
                                            :something-else    (gen/not-empty gen/string-alphanumeric))
                                        1)
 
-        sample-size 20
+        sample-size 3
         multi-profiles (gen/sample (gen/hash-map
                                      :id                gen/uuid
                                      :something-else    (gen/not-empty gen/string-alphanumeric))
                                    sample-size)
-        to-remove (take (int (/ sample-size 2)) multi-profiles)]
+        half-profiles (take (int (/ sample-size 2)) multi-profiles)]
 
-    ;index and unindex 1 profile
     (index-unindex-multi-test client single-profile single-profile)
-
-    ;index and unindex multi-profiles
-    (index-unindex-multi-test client multi-profiles to-remove)
-
-    ;index multiples times than unindex
-    (index-unindex-multi-test client multi-profiles nil)
-    (index-unindex-multi-test client multi-profiles to-remove)
-    ))
+    (index-unindex-multi-test client multi-profiles multi-profiles)
+    (index-unindex-multi-test client half-profiles nil)
+    ;index all profiles, some already indexed
+    (index-unindex-multi-test client multi-profiles multi-profiles)))
 
 

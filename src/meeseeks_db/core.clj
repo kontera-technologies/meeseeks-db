@@ -255,7 +255,7 @@
 
 
 (defn multi-index!
-  "Index and store an object."
+  "Index and store each object in obj_list."
   [{:keys [db data-db f-multi-id->iid f-index f-id->conn]} obj_list]
   (let [db          (deref db)
         data-db     (deref data-db)
@@ -307,7 +307,7 @@
                 (save-object! (:id obj_i) obj_i)))))))
 
 (defn multi-unindex!
-  "Remove the object and its indices. for each id in id-list"
+  "Remove each object in id_list and its indices."
   [{:keys [db data-db f-id->conn f-multi-id->iid f-index]} id_list]
   (let [db        @db
         data-db   @data-db

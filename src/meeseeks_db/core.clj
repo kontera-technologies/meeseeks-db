@@ -121,7 +121,7 @@
 
                            (when (not-empty key-id_list) (wcar conn (apply car/mset key-id_list))))))
 
-           iid_list (wcar conn (apply car/mget (doall (map #(str "id:" %) id_list))))
+           iid_list (wcar conn (apply car/mget (map #(str "id:" %) id_list)))
            i-id-iid_list (map-indexed (fn [i [id_i iid_i]] {:i i :id id_i :iid iid_i}) (map list id_list iid_list))
            iid-found?i-id-iid_list (group-by (fn [idx-id-iid] (some? (:iid idx-id-iid))) i-id-iid_list)
            i-id-exist-iid_list (get iid-found?i-id-iid_list true)
@@ -260,16 +260,16 @@
   (let [db          (deref db)
         data-db     (deref data-db)
         conn-dconn->obj_list (let [id_list (map :id obj_list)
-                                  conn_list (doall (map #(f-id->conn db %) id_list))
-                                  data-conn_list (doall (map #(f-id->conn data-db %) id_list))]
+                                  conn_list (map #(f-id->conn db %) id_list)
+                                  data-conn_list (map #(f-id->conn data-db %) id_list)]
                         (group-by-idx (fn [idx] [(nth conn_list idx) (nth data-conn_list idx)]) obj_list))
         todo (map (fn [[[conn data-conn] obj]]
                     (let [id (map :id obj)
                           iid (f-multi-id->iid conn id)
-                          old (wcar data-conn (doall (map #(fetch-object %) id)))
+                          old (wcar data-conn (map #(fetch-object %) id))
                           old (flatten (conj [] old))
 
-                          index-pairs (doall (map
+                          index-pairs (map
                                                (fn [[old_i obj_i]]
                                                   (merge-with conj
                                                     (->> (indexify f-index old_i)
@@ -278,20 +278,20 @@
                                                     (->> (indexify f-index obj_i)
                                                          (map (fn [[k vs]] [k {:new vs}]))
                                                        (into {}))))
-                                               (map list old obj)))
+                                               (map list old obj))
                           ]
                       [conn data-conn obj iid index-pairs]))
                   (seq conn-dconn->obj_list))]
 
     (doseq [[conn data-conn obj_list iid_list index-pairs_list] todo]
       (let [iid-id_list (map list iid_list (map :id obj_list))
-            result-id_list (wcar conn (apply car/mget (doall (map #(str "iid:" %) iid_list))))
-            iid->id (doall (flatten (map first (filter (fn [[iid-id id?]] (nil? id?))
-                                             (map list iid-id_list result-id_list)))))
+            result-id_list (wcar conn (apply car/mget (map #(str "iid:" %) iid_list)))
+            iid->id (flatten (map first (filter (fn [[iid-id id?]] (nil? id?))
+                                             (map list iid-id_list result-id_list))))
             iid-index-pairs (filter
                               (fn [[iid_i index-pairs_i]] (and iid_i (not-empty index-pairs_i)))
                               (map list iid_list index-pairs_list))
-            iid_list (doall (map first iid-index-pairs))]
+            iid_list (map first iid-index-pairs)]
 
             (when (seq iid->id) (wcar conn (apply car/mset iid->id)))
 
@@ -311,11 +311,11 @@
   [{:keys [db data-db f-id->conn f-multi-id->iid f-index]} id_list]
   (let [db        @db
         data-db   @data-db
-        conn-dconn->id_list (let [conn (doall (map #(f-id->conn db %) id_list))
-                            data-conn (doall (map #(f-id->conn data-db %) id_list))]
+        conn-dconn->id_list (let [conn (map #(f-id->conn db %) id_list)
+                            data-conn (map #(f-id->conn data-db %) id_list)]
                         (group-by-idx (fn [idx] [(nth conn idx) (nth data-conn idx)]) id_list))
 
-        conn-dconn->id_list-iid_list-indices_list (doall (map
+        conn-dconn->id_list-iid_list-indices_list (map
                   (fn [[[conn data-conn] id-list]]
                     (let [iid-list (flatten (conj [] (f-multi-id->iid conn id-list "delete")))
 
@@ -323,7 +323,7 @@
                           indices_list (map #(indexify f-index %) obj_list)]
 
                       [conn data-conn id-list iid-list indices_list]))
-                  (seq conn-dconn->id_list)))]
+                  (seq conn-dconn->id_list))]
 
     (doseq [[conn data-conn id_list iid-list indices_list] conn-dconn->id_list-iid_list-indices_list]
       (wcar conn

@@ -295,10 +295,10 @@
 
         (when (seq iid->id) (wcar conn (apply car/mset iid->id)))
 
-        (doseq [[iid_i index-pairs_i] iid-index-pairs]
-          (wcar conn
-                (doseq [[k {:keys [old_i new_i]}] index-pairs_i]
-                  (update-attr! iid_i k old_i new_i))))
+        (wcar conn
+          (doseq [[iid_i index-pairs_i] iid-index-pairs]
+            (doseq [[k {:keys [old new]}] index-pairs_i]
+              (update-attr! iid_i k old new))))
 
         (when (seq iid_list) (wcar conn (apply car/sadd "total" iid_list)))
 
@@ -318,9 +318,8 @@
         conn-dconn->id_list-iid_list-indices_list (doall (map
                                                            (fn [[[conn data-conn] id-list]]
                                                              (let [iid-list (flatten (conj [] (f-multi-id->iid conn id-list "delete")))
-
-                                                                   obj_list (flatten (conj [] (wcar data-conn (map #(fetch-object %) id-list))))
-                                                                   indices_list (map #(indexify f-index %) obj_list)]
+                                                                   obj_list (flatten (conj [] (wcar data-conn (doall (map #(fetch-object %) id-list)))))
+                                                                   indices_list (doall (map #(indexify f-index %) obj_list))]
 
                                                                [conn data-conn id-list iid-list indices_list]))
                                                            (seq conn-dconn->id_list)))]

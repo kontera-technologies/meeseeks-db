@@ -351,12 +351,13 @@
         id->conn (:f-id->conn client)
         db-buckets (group-by #(id->conn db %) ids)]
     (doall (pmap (fn [[db ids]]
-                   (when (not-empty ids)
-                     (let [iids (wcar db (apply car/mget (map #(str "id:" %) ids)))
-                           key-name (str "custom:" (name attribute-name))]
-                       (wcar db
-                             (apply car/sadd key-name iids)
-                             (car/expire key-name 3600))))) db-buckets))))
+            (when (not-empty ids)
+              (let [iids (wcar db (apply car/mget (map #(str "id:" %) ids)))
+                    key-name (str "custom:" (name attribute-name))]
+                (wcar db
+                      (apply car/sadd key-name iids)
+                      (car/sinterstore key-name key-name "total")
+                      (car/expire key-name 3600))))) db-buckets))))
 
 (defn fix-custom-keys* [query mangle-map]
   (if (empty? (:nested query))

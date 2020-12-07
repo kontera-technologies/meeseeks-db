@@ -6,7 +6,7 @@ services:
 language: clojure
 
 jdk:
-  - openjdk9
+  - oraclejdk11
 
 before_install:
   - docker pull redis

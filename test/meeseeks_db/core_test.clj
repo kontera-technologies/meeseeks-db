@@ -28,11 +28,13 @@
             [meeseeks-db.test-db :refer [initialize-client index-entities!]]
             [meeseeks-db.query :as q]
             [meeseeks-db.utils :as u]
-            [meeseeks-db.cursor :as cursor]))
+            [meeseeks-db.cursor :as cursor]
+            [taoensso.carmine :as car :refer [wcar]] ;query indices
+            ))
 
 (clojure.test/use-fixtures :once validate-schemas)
 
-;; utils
+; utils
 
 (defn prop-is? [k v o]
   (= v (get o k)))
@@ -539,27 +541,107 @@
         (is (= (count filtered-mb) (:size (nth results 2))))
         (is (= (count filtered-fb) (:size (nth results 3))))))))
 
-(deftest smart-bulk-bug
-  (let [client   (initialize-client profile-indexer)
-        profiles (gen/sample profile-gen 300)]
-    (index-entities! client profiles)
-    (let [expected-count    (count
-                              (intersection
-                                 (intersection
-                                  (set (filter #(prop-visited? "bing.com" %) profiles))
-                                  (set (filter #(prop-is? :cc "us" %) profiles)))
-                                 (set (filter #(prop-visited? "bing.com" %) profiles))))
-          common-filters    '(and "d:bing.com" "cc:us")
-          query             '(and "d:bing.com")
-          reference-filters '(and "cc:us")]
-      (doseq [i (range 10)
-              :let [rs  (q/bulk-scoped-queries client common-filters
-                                               (take i (repeat query)))
-                    srs (q/bulk-scoped-smarter-queries client common-filters
-                                                       (take i (repeat query))
-                                                       reference-filters)]]
-        (is (every? (fn [[r sr]]
-                      (and (= expected-count (:size r))
-                           (or (= -1 (:size sr))
-                               (= (:size r) (:size sr)))))
-                    (map vector rs srs)))))))
+;(deftest smart-bulk-bug
+;  (let [client   (initialize-client profile-indexer)
+;        profiles (gen/sample profile-gen 300)]
+;    (index-entities! client profiles)
+;    (let [expected-count    (count
+;                              (intersection
+;                                 (intersection
+;                                  (set (filter #(prop-visited? "bing.com" %) profiles))
+;                                  (set (filter #(prop-is? :cc "us" %) profiles)))
+;                                 (set (filter #(prop-visited? "bing.com" %) profiles))))
+;          common-filters    '(and "d:bing.com" "cc:us")
+;          query             '(and "d:bing.com")
+;          reference-filters '(and "cc:us")]
+;      (doseq [i (range 10)
+;              :let [rs  (q/bulk-scoped-queries client common-filters
+;                                               (take i (repeat query)))
+;                    srs (q/bulk-scoped-smarter-queries client common-filters
+;                                                       (take i (repeat query))
+;                                                       reference-filters)]]
+;        (is (every? (fn [[r sr]]
+;                      (and (= expected-count (:size r))
+;                           (or (= -1 (:size sr))
+;                               (= (:size r) (:size sr)))))
+;                    (map vector rs srs)))))))
+;
+;
+
+
+(defn index-unindex-multi-test [client to-index to-unindex]
+
+  (let [; don't care about performance here,
+        ; just need to verify that iid's exist in age:2-11 attr
+        db (deref (:db client))
+        to-index-ids (map :id to-index)
+        to-index-conns (map #(sut/default-id->conn db %) to-index-ids)
+        to-index-iids (flatten (map (fn [[conn id]] (sut/default-multi-id->iid conn [id]))
+                                    (map list to-index-conns to-index-ids)))
+        to-index-conns-iids (doall (map list to-index-conns to-index-iids))
+
+        to-unindex-ids (map :id to-unindex)
+        to-unindex-conns (map #(sut/default-id->conn db %) to-unindex-ids)
+        to-unindex-iids (flatten (map (fn [[conn id]] (sut/default-multi-id->iid conn [id]))
+                                    (map list to-unindex-conns to-unindex-ids)))
+        to-unindex-conns-iids (doall (map list to-unindex-conns to-unindex-iids))]
+
+    (testing "multi-index!"
+        (let [indexed-before (sut/query client "total" 100 [:id :something-else :age])
+              _ (sut/multi-index! client to-index)
+              indexed-after (sut/query client "total" 100 [:id :something-else :age])]
+
+          (is (= (count (union (set (:sample indexed-before)) (set to-index)))
+                 (:size indexed-after)))
+
+          (is (= (union (set (map :id (:sample indexed-before))) (set (map :id to-index)))
+                 (set (map :id (:sample indexed-after)))))
+
+          (is (= (union (set (:sample indexed-before)) (set to-index)))
+                 (set (:sample indexed-after)))
+
+          (doseq [[conn iid] to-index-conns-iids]
+            (is (some? (some #{(str iid)} (wcar conn (car/smembers "age:2-11"))))))))
+
+
+    (testing "multi-unindex!"
+      (let [indexed-before (sut/query client "total" 100 [:id :something-else :age])
+            _ (sut/multi-unindex! client (map :id to-unindex))
+            indexed-after (sut/query client "total" 100 [:id :something-else :age])]
+
+        (is (= (count (difference (set (:sample indexed-before)) (set to-unindex)))
+               (:size indexed-after)))
+
+        (is (= (difference (set (map :id (:sample indexed-before))) (set (map :id to-unindex)))
+               (set (map :id (:sample indexed-after)))))
+
+        (is (= (difference (set (:sample indexed-before)) (set to-unindex)))
+            (set (:sample indexed-after)))
+
+        (doseq [[conn iid] to-unindex-conns-iids]
+          (is (nil? (some #{(str iid)} (wcar conn (car/smembers "age:2-11"))))))))))
+
+
+(deftest multi!
+  (let [client (initialize-client profile-indexer)
+        sample-size 3
+
+        single-profile (gen/sample (gen/hash-map
+                                           :id                gen/uuid
+                                           :something-else    (gen/not-empty gen/string-alphanumeric)
+                                           :age              (gen/elements ["2-11"]))
+                                       1)
+
+        multi-profiles (gen/sample (gen/hash-map
+                                     :id                gen/uuid
+                                     :something-else    (gen/not-empty gen/string-alphanumeric)
+                                     :age              (gen/elements ["2-11"]))
+                                   sample-size)
+        half-profiles (take (int (/ sample-size 2)) multi-profiles)]
+
+    (index-unindex-multi-test client single-profile single-profile)
+    (index-unindex-multi-test client multi-profiles multi-profiles)
+    (index-unindex-multi-test client half-profiles nil)
+    (index-unindex-multi-test client multi-profiles multi-profiles)
+    ))
+

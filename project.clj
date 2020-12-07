@@ -1,4 +1,4 @@
-(defproject com.amobee/meeseeks-db "0.10.20"
+(defproject meeseeks-db "0.20.00"
   :description "Redis-based fast sharded set-oriented DB"
   :url "https://github.com/kontera-technologies/meeseeks-db"
   :dependencies [[org.clojure/clojure     "1.9.0"]
@@ -11,12 +11,17 @@
             :url    "https://www.gnu.org/licenses/lgpl-3.0.en.html"}
   :repl-options {:init-ns user
                  :init    (set! *print-length* 100)}
-  :deploy-repositories [["releases" :clojars]
-                        ["snapshots" :clojars]]
+  :deploy-repositories [["releases" {:url      "s3p://kona-repo/maven/releases/"
+                                     :no-auth true
+                                     :sign-releases false}]
+                        ["snapshots" {:url      "s3p://kona-repo/maven/snapshots/"
+                                      :no-auth true
+                                      :sign-releases false}]]
   :profiles {:dev {:source-paths ["dev"]
                    :dependencies [[org.clojure/tools.nrepl "0.2.12"]
                                   [org.clojure/tools.namespace "0.2.11"]
                                   [org.clojure/test.check  "0.9.0"]
-                                  [midje                   "1.9.1"]]
-                   :plugins [[lein-midje "3.2.1"]]}
+                                  [midje                   "1.9.9"]]
+                   :plugins [[s3-wagon-private "1.3.3"]
+                             [lein-midje "3.2.1"]]}
              :repl {:plugins [[com.billpiel/sayid "0.0.10"]]}})

@@ -80,19 +80,6 @@
 
 ;; default id<->iid mappers
 
-#_(defn default-id->iid
-  ([conn id]
-   (if-let [iid (wcar conn (car/get (str "id:" id)))]
-     iid
-     (let [iid (wcar conn (car/incr "next-iid"))]
-       (when iid (car/atomic conn 10
-                     (car/multi)
-                     (car/setnx (str "id:" id) iid)
-                     (car/setnx (str "iid:" iid) id)))
-       (wcar conn (car/get (str "id:" id))))))
-  ([conn id delete?]
-   (wcar conn (car/get (str "id:" id)))))
-
 ;hard fix for nil users
 (defn default-id->iid
   ([conn id]

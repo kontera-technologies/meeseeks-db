@@ -108,7 +108,7 @@
    (wcar conn (car/get (str "id:" id)))))
 
 
-(defn default-multi-id->iid
+(defn default-bulk-id->iid
   ([conn id_list]
    (let [save-id (fn [i-id-iid_list]
                    (when i-id-iid_list
@@ -169,14 +169,14 @@
    (s/optional-key :f-id->iid) (s/pred fn?)
    (s/optional-key :f-iid->id) (s/pred fn?)
    (s/optional-key :f-id->conn) (s/pred fn?)
-   (s/optional-key :f-multi-id->iid) (s/pred fn?)})
+   (s/optional-key :f-bulk-id->iid) (s/pred fn?)})
 
 (s/defn init [dbs :- (deref-of [Connection]) {:keys [f-index data-db f-id->iid f-iid->id f-id->conn
-                                                     f-multi-id->iid ]
+                                                     f-bulk-id->iid ]
                                               :or   {f-id->iid  default-id->iid
                                                      f-iid->id  default-iid->id
                                                      f-id->conn default-id->conn
-                                                     f-multi-id->iid default-multi-id->iid}} :- ClientConfig]
+                                                     f-bulk-id->iid default-bulk-id->iid}} :- ClientConfig]
   "Initialize meeseeks client
 
   Options:
@@ -193,7 +193,7 @@
              :f-id->conn f-id->conn
              :f-iid->id f-iid->id
              :f-index   f-index
-             :f-multi-id->iid f-multi-id->iid}]
+             :f-bulk-id->iid f-bulk-id->iid}]
     mdb))
 
 (defn index!
@@ -254,9 +254,9 @@
 
 
 
-(defn multi-index!
+(defn bulk-index!
   "Index and store each object in obj_list."
-  [{:keys [db data-db f-multi-id->iid f-index f-id->conn]} obj_list]
+  [{:keys [db data-db f-bulk-id->iid f-index f-id->conn]} obj_list]
   (let [db          (deref db)
         data-db     (deref data-db)
         conn-dconn->obj_list (let [id_list (map :id obj_list)
@@ -265,7 +265,7 @@
                                (group-by-idx (fn [idx] [(nth conn_list idx) (nth data-conn_list idx)]) obj_list))
         todo (map (fn [[[conn data-conn] obj]]
                     (let [id (map :id obj)
-                          iid (f-multi-id->iid conn id)
+                          iid (f-bulk-id->iid conn id)
                           old (wcar data-conn (doall (map #(fetch-object %) id)))
                           old (flatten (conj [] old))
 
@@ -306,9 +306,9 @@
               (doseq [obj_i obj_list]
                 (save-object! (:id obj_i) obj_i)))))))
 
-(defn multi-unindex!
+(defn bulk-unindex!
   "Remove each object in id_list and its indices."
-  [{:keys [db data-db f-id->conn f-multi-id->iid f-index]} id_list]
+  [{:keys [db data-db f-id->conn f-bulk-id->iid f-index]} id_list]
   (let [db        @db
         data-db   @data-db
         conn-dconn->id_list (let [conn (doall (map #(f-id->conn db %) id_list))
@@ -317,7 +317,7 @@
 
         conn-dconn->id_list-iid_list-indices_list (doall (map
                                                            (fn [[[conn data-conn] id-list]]
-                                                             (let [iid-list (flatten (conj [] (f-multi-id->iid conn id-list "delete")))
+                                                             (let [iid-list (flatten (conj [] (f-bulk-id->iid conn id-list "delete")))
                                                                    obj_list (flatten (conj [] (wcar data-conn (doall (map #(fetch-object %) id-list)))))
                                                                    indices_list (doall (map #(indexify f-index %) obj_list))]
 

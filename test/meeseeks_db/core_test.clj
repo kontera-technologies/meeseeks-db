@@ -569,26 +569,23 @@
 ;
 
 
-(defn index-unindex-multi-test [client to-index to-unindex]
-
-  (let [; don't care about performance here,
-        ; just need to verify that iid's exist in age:2-11 attr
-        db (deref (:db client))
+(defn assert-bulk-index-unindex [client to-index to-unindex]
+  (let [db (deref (:db client))
         to-index-ids (map :id to-index)
         to-index-conns (map #(sut/default-id->conn db %) to-index-ids)
-        to-index-iids (flatten (map (fn [[conn id]] (sut/default-multi-id->iid conn [id]))
+        to-index-iids (flatten (map (fn [[conn id]] (sut/default-bulk-id->iid conn [id]))
                                     (map list to-index-conns to-index-ids)))
         to-index-conns-iids (doall (map list to-index-conns to-index-iids))
 
         to-unindex-ids (map :id to-unindex)
         to-unindex-conns (map #(sut/default-id->conn db %) to-unindex-ids)
-        to-unindex-iids (flatten (map (fn [[conn id]] (sut/default-multi-id->iid conn [id]))
+        to-unindex-iids (flatten (map (fn [[conn id]] (sut/default-bulk-id->iid conn [id]))
                                     (map list to-unindex-conns to-unindex-ids)))
         to-unindex-conns-iids (doall (map list to-unindex-conns to-unindex-iids))]
 
-    (testing "multi-index!"
+    (testing "bulk-index!"
         (let [indexed-before (sut/query client "total" 100 [:id :something-else :age])
-              _ (sut/multi-index! client to-index)
+              _ (sut/bulk-index! client to-index)
               indexed-after (sut/query client "total" 100 [:id :something-else :age])]
 
           (is (= (count (union (set (:sample indexed-before)) (set to-index)))
@@ -604,9 +601,9 @@
             (is (some? (some #{(str iid)} (wcar conn (car/smembers "age:2-11"))))))))
 
 
-    (testing "multi-unindex!"
+    (testing "bulk-unindex!"
       (let [indexed-before (sut/query client "total" 100 [:id :something-else :age])
-            _ (sut/multi-unindex! client (map :id to-unindex))
+            _ (sut/bulk-unindex! client (map :id to-unindex))
             indexed-after (sut/query client "total" 100 [:id :something-else :age])]
 
         (is (= (count (difference (set (:sample indexed-before)) (set to-unindex)))
@@ -622,7 +619,7 @@
           (is (nil? (some #{(str iid)} (wcar conn (car/smembers "age:2-11"))))))))))
 
 
-(deftest multi!
+(deftest bulk-index-unindex-test!
   (let [client (initialize-client profile-indexer)
         sample-size 3
 
@@ -632,16 +629,16 @@
                                            :age              (gen/elements ["2-11"]))
                                        1)
 
-        multi-profiles (gen/sample (gen/hash-map
+        profiles (gen/sample (gen/hash-map
                                      :id                gen/uuid
                                      :something-else    (gen/not-empty gen/string-alphanumeric)
                                      :age              (gen/elements ["2-11"]))
                                    sample-size)
-        half-profiles (take (int (/ sample-size 2)) multi-profiles)]
+        half-profiles (take (int (/ sample-size 2)) profiles)]
 
-    (index-unindex-multi-test client single-profile single-profile)
-    (index-unindex-multi-test client multi-profiles multi-profiles)
-    (index-unindex-multi-test client half-profiles nil)
-    (index-unindex-multi-test client multi-profiles multi-profiles)
-    ))
+    (assert-bulk-index-unindex client single-profile single-profile)
+    (assert-bulk-index-unindex client profiles profiles)
+    (assert-bulk-index-unindex client half-profiles nil)
+    ;index all profiles, some already indexed
+    (assert-bulk-index-unindex client profiles profiles)))
 
